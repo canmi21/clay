@@ -1,7 +1,7 @@
 /* src/app.tsx */
 
 import { createSignal } from "solid-js";
-import "./app.css";
+import "./styles/app.css";
 
 export default function App() {
   const [count, setCount] = createSignal(0);
