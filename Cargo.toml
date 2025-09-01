@@ -4,7 +4,11 @@ version = "1.0.0"
 edition = "2024"
 
 [dependencies]
+ansi-to-tui = "7"
 anyhow = "1"
+bitflags = "2.9"
 crossterm = "0.29"
 portable-pty = "0.9"
 ratatui = "0.29"
+strip-ansi-escapes = "0.2"
+vte = { version = "0.15", features = ["ansi"] }

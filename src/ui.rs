@@ -3,6 +3,7 @@
 use crate::app::{App, BottomBarMode};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
+    // 关键改动：移除了不再使用的 Wrap
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
@@ -23,13 +24,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
 
     match app.bottom_bar_mode {
         BottomBarMode::Command => {
-            // Corrected: Pass a tuple (x, y) to set_cursor_position
             let cursor_x = chunks[2].x + 2 + app.command_cursor_position as u16;
             let cursor_y = chunks[2].y + 1;
             frame.set_cursor_position((cursor_x, cursor_y));
         }
         _ => {
-            // Corrected: Pass a tuple (x, y) to set_cursor_position
             let area = frame.area();
             frame.set_cursor_position((area.width, area.height));
         }
@@ -37,11 +36,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
 }
 
 fn render_shell_pane(frame: &mut Frame, app: &App, area: Rect) {
-    let text = app.shell_output.join("\n");
-    let block = Block::default().borders(Borders::ALL).title("Shell (Scroll with Up/Down)");
-    let paragraph = Paragraph::new(text)
-        .block(block)
-        .scroll((app.shell_scroll_state, 0));
+    let block = Block::default().borders(Borders::ALL).title("Shell");
+    let lines = app.terminal.get_visible_lines();
+    let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }
 

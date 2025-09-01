@@ -3,13 +3,15 @@
 mod app;
 mod shell;
 mod ui;
+// 添加新模块
+mod terminal;
 
 use crate::app::{App, BottomBarMode};
 use crate::shell::ShellProcess;
 use crate::ui::ui;
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -22,23 +24,19 @@ use std::{io, time::Duration};
 fn main() -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
-    // Get terminal size for the PTY
     let (cols, rows) = terminal.size().map(|r| (r.width, r.height))?;
-    let mut shell_process = ShellProcess::new(rows, cols)?;
+    // App::new 现在需要尺寸
+    let mut app = App::new(cols, rows.saturating_sub(8)); // 减去日志和命令栏高度
+    let mut shell_process = ShellProcess::new(rows.saturating_sub(8), cols)?;
 
     run_app(&mut terminal, &mut app, &mut shell_process)?;
 
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     Ok(())
@@ -52,12 +50,11 @@ fn run_app<B: Backend>(
     loop {
         terminal.draw(|f| ui(f, app))?;
 
-        // Poll for shell output without blocking
-        if let Some(output) = shell_process.read_output() {
-            app.add_shell_output(output);
+        // 关键改动：读取字节并喂给 VTE
+        if let Some(bytes) = shell_process.read_output_bytes() {
+            app.terminal.process_bytes(&bytes);
         }
 
-        // Poll for keyboard events with a timeout
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
@@ -83,6 +80,7 @@ fn run_app<B: Backend>(
     }
 }
 
+// ... handle_command_mode_keys 保持不变 ...
 fn handle_command_mode_keys(
     key: event::KeyEvent,
     app: &mut App,
@@ -130,6 +128,7 @@ fn handle_command_mode_keys(
     Ok(())
 }
 
+// 关键改动：Up/Down 不再需要控制滚动
 fn handle_normal_mode_keys(key: event::KeyEvent, app: &mut App) {
     match key.code {
         KeyCode::Esc => app.should_quit = true,
@@ -139,16 +138,6 @@ fn handle_normal_mode_keys(key: event::KeyEvent, app: &mut App) {
                 app.history_index = app.command_history.len();
             }
         }
-        // These now control the shell pane scroll state
-        KeyCode::Up => {
-            app.shell_scroll_state = app.shell_scroll_state.saturating_sub(1);
-        }
-        KeyCode::Down => {
-            let max_scroll = (app.shell_output.len().saturating_sub(1)) as u16;
-            if app.shell_scroll_state < max_scroll {
-                app.shell_scroll_state += 1;
-            }
-        }
-        _ => {}
+        _ => {} // Up/Down 不再有作用
     }
 }

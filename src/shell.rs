@@ -7,9 +7,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
-// A wrapper to handle the shell subprocess
 pub struct ShellProcess {
-    // pty_system is no longer needed here as it's only used during creation.
     child: Box<dyn Child + Send>,
     writer: Box<dyn Write + Send>,
     pub reader_thread: Option<JoinHandle<()>>,
@@ -18,7 +16,6 @@ pub struct ShellProcess {
 
 impl ShellProcess {
     pub fn new(rows: u16, cols: u16) -> Result<Self> {
-        // Use pty_system as a local variable.
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
             rows,
@@ -29,7 +26,8 @@ impl ShellProcess {
         let shell_program = Self::find_shell()?;
         let mut cmd = CommandBuilder::new(shell_program);
         cmd.cwd(std::env::current_dir()?);
-
+        // 我们不再需要 TERM=xterm 或 dumb，让它使用默认值
+        
         let child = pair.slave.spawn_command(cmd)?;
         let writer = pair.master.take_writer()?;
         let mut reader = pair.master.try_clone_reader()?;
@@ -76,12 +74,13 @@ impl ShellProcess {
         self.writer.write_all(data)
     }
 
-    pub fn read_output(&self) -> Option<String> {
+    // 关键改动：现在返回原始字节 Vec<u8>
+    pub fn read_output_bytes(&self) -> Option<Vec<u8>> {
         let mut buffer_lock = self.output_buffer.lock().unwrap();
         if buffer_lock.is_empty() {
             None
         } else {
-            let output = String::from_utf8_lossy(buffer_lock.as_slice()).to_string();
+            let output = buffer_lock.clone();
             buffer_lock.clear();
             Some(output)
         }

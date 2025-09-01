@@ -1,5 +1,8 @@
 /* src/app.rs */
 
+// 导入我们的新模块
+use crate::terminal::VirtualTerminal;
+
 #[derive(PartialEq)]
 pub enum BottomBarMode {
     Tips,
@@ -9,10 +12,9 @@ pub enum BottomBarMode {
 }
 
 pub struct App {
-    pub shell_output: Vec<String>,
+    // 关键改动：用 VirtualTerminal 替换旧的 shell_output 和滚动状态
+    pub terminal: VirtualTerminal,
     pub logs: Vec<String>,
-    // New state for shell scrolling, removed logs_scroll_state
-    pub shell_scroll_state: u16,
     pub bottom_bar_mode: BottomBarMode,
     pub should_quit: bool,
     pub command_input: String,
@@ -22,11 +24,11 @@ pub struct App {
 }
 
 impl App {
-    pub fn new() -> App {
+    // App::new 现在需要知道终端尺寸
+    pub fn new(cols: u16, rows: u16) -> Self {
         App {
-            shell_output: vec![],
+            terminal: VirtualTerminal::new(rows, cols),
             logs: vec!["Welcome to Clay! Press '/' to enter command mode.".to_string()],
-            shell_scroll_state: 0,
             bottom_bar_mode: BottomBarMode::Tips,
             should_quit: false,
             command_input: String::new(),
@@ -36,21 +38,8 @@ impl App {
         }
     }
 
-    // New method to add output to the shell pane and enforce 500 lines limit
-    pub fn add_shell_output(&mut self, new_lines_str: String) {
-        let new_lines: Vec<String> = new_lines_str.split('\n').map(String::from).collect();
-        self.shell_output.extend(new_lines);
-        
-        let line_count = self.shell_output.len();
-        if line_count > 500 {
-            let lines_to_remove = line_count - 500;
-            self.shell_output.drain(0..lines_to_remove);
-            // Adjust scroll state to prevent it from being out of bounds
-            self.shell_scroll_state = self.shell_scroll_state.saturating_sub(lines_to_remove as u16);
-        }
-    }
-
-    // Methods from previous step remain the same
+    // add_shell_output 不再需要，逻辑移至 main 循环
+    
     pub fn move_cursor_left(&mut self) {
         self.command_cursor_position = self.command_cursor_position.saturating_sub(1);
     }
