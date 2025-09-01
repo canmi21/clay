@@ -12,11 +12,11 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    backend::{Backend, CrosstermBackend},
     Terminal,
+    backend::{Backend, CrosstermBackend},
 };
 use std::{io, time::Duration};
 
@@ -33,8 +33,7 @@ fn main() -> Result<()> {
     let shell_pane_inner_width = size.width.saturating_sub(2);
 
     let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height);
-    let mut shell_process =
-        ShellProcess::new(shell_pane_inner_height, shell_pane_inner_width)?;
+    let mut shell_process = ShellProcess::new(shell_pane_inner_height, shell_pane_inner_width)?;
 
     run_app(&mut terminal, &mut app, &mut shell_process)?;
 

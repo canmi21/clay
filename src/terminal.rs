@@ -133,10 +133,22 @@ impl TerminalState {
         let fg_color = self.ratatui_style_to_color(self.current_style.fg);
         let bg_color = self.ratatui_style_to_color(self.current_style.bg);
         let mut flags = CellFlags::empty();
-        if self.current_style.add_modifier.contains(Modifier::BOLD) { flags |= CellFlags::BOLD; }
-        if self.current_style.add_modifier.contains(Modifier::ITALIC) { flags |= CellFlags::ITALIC; }
-        if self.current_style.add_modifier.contains(Modifier::UNDERLINED) { flags |= CellFlags::UNDERLINE; }
-        if self.current_style.add_modifier.contains(Modifier::REVERSED) { flags |= CellFlags::INVERSE; }
+        if self.current_style.add_modifier.contains(Modifier::BOLD) {
+            flags |= CellFlags::BOLD;
+        }
+        if self.current_style.add_modifier.contains(Modifier::ITALIC) {
+            flags |= CellFlags::ITALIC;
+        }
+        if self
+            .current_style
+            .add_modifier
+            .contains(Modifier::UNDERLINED)
+        {
+            flags |= CellFlags::UNDERLINE;
+        }
+        if self.current_style.add_modifier.contains(Modifier::REVERSED) {
+            flags |= CellFlags::INVERSE;
+        }
 
         if let Some(cell) = self.grid.cell_mut(self.cursor_row, self.cursor_col) {
             cell.c = c;
@@ -171,10 +183,14 @@ impl Perform for TerminalState {
             b'\t' => {
                 let tab_stop = 8;
                 let spaces = tab_stop - (self.cursor_col % tab_stop);
-                for _ in 0..spaces { self.write_char(' '); }
+                for _ in 0..spaces {
+                    self.write_char(' ');
+                }
             }
             b'\x08' => {
-                if self.cursor_col > 0 { self.cursor_col -= 1; }
+                if self.cursor_col > 0 {
+                    self.cursor_col -= 1;
+                }
             }
             _ => {}
         }
@@ -186,7 +202,13 @@ impl Perform for TerminalState {
     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
 
-    fn csi_dispatch(&mut self, params: &vte::Params, _intermediates: &[u8], _ignore: bool, c: char) {
+    fn csi_dispatch(
+        &mut self,
+        params: &vte::Params,
+        _intermediates: &[u8],
+        _ignore: bool,
+        c: char,
+    ) {
         match c {
             'A' => {
                 let lines = params.iter().next().and_then(|p| p.get(0)).unwrap_or(&1);
@@ -209,8 +231,16 @@ impl Perform for TerminalState {
             }
             'H' => {
                 let mut iter = params.iter();
-                let row = iter.next().and_then(|p| p.get(0)).unwrap_or(&1).saturating_sub(1) as usize;
-                let col = iter.next().and_then(|p| p.get(0)).unwrap_or(&1).saturating_sub(1) as usize;
+                let row = iter
+                    .next()
+                    .and_then(|p| p.get(0))
+                    .unwrap_or(&1)
+                    .saturating_sub(1) as usize;
+                let col = iter
+                    .next()
+                    .and_then(|p| p.get(0))
+                    .unwrap_or(&1)
+                    .saturating_sub(1) as usize;
                 self.cursor_row = row.min(self.grid.height() - 1);
                 self.cursor_col = col.min(self.grid.width() - 1);
                 self.update_content_bottom();
@@ -220,14 +250,22 @@ impl Perform for TerminalState {
                 match mode {
                     0 => {
                         for col in self.cursor_col..self.grid.width() {
-                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
+                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
+                                *cell = Cell::default();
+                            }
                         }
-                        for row in (self.cursor_row + 1)..self.grid.height() { self.grid.clear_line(row); }
+                        for row in (self.cursor_row + 1)..self.grid.height() {
+                            self.grid.clear_line(row);
+                        }
                     }
                     1 => {
-                        for row in 0..self.cursor_row { self.grid.clear_line(row); }
+                        for row in 0..self.cursor_row {
+                            self.grid.clear_line(row);
+                        }
                         for col in 0..=self.cursor_col {
-                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
+                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
+                                *cell = Cell::default();
+                            }
                         }
                     }
                     2 => self.grid.clear_all(),
@@ -239,12 +277,16 @@ impl Perform for TerminalState {
                 match mode {
                     0 => {
                         for col in self.cursor_col..self.grid.width() {
-                           if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
+                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
+                                *cell = Cell::default();
+                            }
                         }
                     }
                     1 => {
                         for col in 0..=self.cursor_col {
-                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
+                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
+                                *cell = Cell::default();
+                            }
                         }
                     }
                     2 => self.grid.clear_line(self.cursor_row),
@@ -256,24 +298,77 @@ impl Perform for TerminalState {
                     for &value in param {
                         match value {
                             0 => self.current_style = Style::default(),
-                            1 => self.current_style = self.current_style.add_modifier(Modifier::BOLD),
-                            3 => self.current_style = self.current_style.add_modifier(Modifier::ITALIC),
-                            4 => self.current_style = self.current_style.add_modifier(Modifier::UNDERLINED),
-                            7 => self.current_style = self.current_style.add_modifier(Modifier::REVERSED),
-                            22 => self.current_style = self.current_style.remove_modifier(Modifier::BOLD),
-                            23 => self.current_style = self.current_style.remove_modifier(Modifier::ITALIC),
-                            24 => self.current_style = self.current_style.remove_modifier(Modifier::UNDERLINED),
-                            27 => self.current_style = self.current_style.remove_modifier(Modifier::REVERSED),
+                            1 => {
+                                self.current_style = self.current_style.add_modifier(Modifier::BOLD)
+                            }
+                            3 => {
+                                self.current_style =
+                                    self.current_style.add_modifier(Modifier::ITALIC)
+                            }
+                            4 => {
+                                self.current_style =
+                                    self.current_style.add_modifier(Modifier::UNDERLINED)
+                            }
+                            7 => {
+                                self.current_style =
+                                    self.current_style.add_modifier(Modifier::REVERSED)
+                            }
+                            22 => {
+                                self.current_style =
+                                    self.current_style.remove_modifier(Modifier::BOLD)
+                            }
+                            23 => {
+                                self.current_style =
+                                    self.current_style.remove_modifier(Modifier::ITALIC)
+                            }
+                            24 => {
+                                self.current_style =
+                                    self.current_style.remove_modifier(Modifier::UNDERLINED)
+                            }
+                            27 => {
+                                self.current_style =
+                                    self.current_style.remove_modifier(Modifier::REVERSED)
+                            }
                             30..=37 => {
-                                let color = match value { 30 => Color::Black, 31 => Color::Red, 32 => Color::Green, 33 => Color::Yellow, 34 => Color::Blue, 35 => Color::Magenta, 36 => Color::Cyan, 37 => Color::White, _ => Color::Reset };
+                                let color = match value {
+                                    30 => Color::Black,
+                                    31 => Color::Red,
+                                    32 => Color::Green,
+                                    33 => Color::Yellow,
+                                    34 => Color::Blue,
+                                    35 => Color::Magenta,
+                                    36 => Color::Cyan,
+                                    37 => Color::White,
+                                    _ => Color::Reset,
+                                };
                                 self.current_style = self.current_style.fg(color);
                             }
                             40..=47 => {
-                                let color = match value { 40 => Color::Black, 41 => Color::Red, 42 => Color::Green, 43 => Color::Yellow, 44 => Color::Blue, 45 => Color::Magenta, 46 => Color::Cyan, 47 => Color::White, _ => Color::Reset };
+                                let color = match value {
+                                    40 => Color::Black,
+                                    41 => Color::Red,
+                                    42 => Color::Green,
+                                    43 => Color::Yellow,
+                                    44 => Color::Blue,
+                                    45 => Color::Magenta,
+                                    46 => Color::Cyan,
+                                    47 => Color::White,
+                                    _ => Color::Reset,
+                                };
                                 self.current_style = self.current_style.bg(color);
                             }
                             90..=97 => {
-                                let color = match value { 90 => Color::DarkGray, 91 => Color::LightRed, 92 => Color::LightGreen, 93 => Color::LightYellow, 94 => Color::LightBlue, 95 => Color::LightMagenta, 96 => Color::LightCyan, 97 => Color::White, _ => Color::Reset };
+                                let color = match value {
+                                    90 => Color::DarkGray,
+                                    91 => Color::LightRed,
+                                    92 => Color::LightGreen,
+                                    93 => Color::LightYellow,
+                                    94 => Color::LightBlue,
+                                    95 => Color::LightMagenta,
+                                    96 => Color::LightCyan,
+                                    97 => Color::White,
+                                    _ => Color::Reset,
+                                };
                                 self.current_style = self.current_style.fg(color);
                             }
                             _ => {}
@@ -337,8 +432,12 @@ impl VirtualTerminal {
     pub fn get_visible_lines(&self) -> Vec<Line<'_>> {
         let mut lines = Vec::with_capacity(self.visible_rows as usize);
 
-        let viewport_bottom = self.state.content_bottom_row.saturating_sub(self.scroll_offset);
-        let viewport_top = viewport_bottom.saturating_sub(self.visible_rows.saturating_sub(1) as usize);
+        let viewport_bottom = self
+            .state
+            .content_bottom_row
+            .saturating_sub(self.scroll_offset);
+        let viewport_top =
+            viewport_bottom.saturating_sub(self.visible_rows.saturating_sub(1) as usize);
 
         for row_idx in viewport_top..=viewport_bottom {
             if let Some(row) = self.state.grid.row(row_idx) {
@@ -360,8 +459,12 @@ impl VirtualTerminal {
     }
 
     pub fn get_cursor_position(&self) -> Option<(u16, u16)> {
-        let viewport_bottom = self.state.content_bottom_row.saturating_sub(self.scroll_offset);
-        let viewport_top = viewport_bottom.saturating_sub(self.visible_rows.saturating_sub(1) as usize);
+        let viewport_bottom = self
+            .state
+            .content_bottom_row
+            .saturating_sub(self.scroll_offset);
+        let viewport_top =
+            viewport_bottom.saturating_sub(self.visible_rows.saturating_sub(1) as usize);
 
         if self.state.cursor_row >= viewport_top && self.state.cursor_row <= viewport_bottom {
             let relative_y = self.state.cursor_row - viewport_top;
@@ -375,10 +478,18 @@ impl VirtualTerminal {
         let mut style = Style::default();
         style = style.fg(cell.fg);
         style = style.bg(cell.bg);
-        if cell.flags.contains(CellFlags::BOLD) { style = style.add_modifier(Modifier::BOLD); }
-        if cell.flags.contains(CellFlags::ITALIC) { style = style.add_modifier(Modifier::ITALIC); }
-        if cell.flags.contains(CellFlags::UNDERLINE) { style = style.add_modifier(Modifier::UNDERLINED); }
-        if cell.flags.contains(CellFlags::INVERSE) { style = style.add_modifier(Modifier::REVERSED); }
+        if cell.flags.contains(CellFlags::BOLD) {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        if cell.flags.contains(CellFlags::ITALIC) {
+            style = style.add_modifier(Modifier::ITALIC);
+        }
+        if cell.flags.contains(CellFlags::UNDERLINE) {
+            style = style.add_modifier(Modifier::UNDERLINED);
+        }
+        if cell.flags.contains(CellFlags::INVERSE) {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
         style
     }
 }

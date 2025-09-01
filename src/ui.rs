@@ -2,9 +2,9 @@
 
 use crate::app::{App, BottomBarMode};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 pub fn ui(frame: &mut Frame, app: &App) {

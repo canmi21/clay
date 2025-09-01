@@ -1,7 +1,7 @@
 /* src/shell.rs */
 
-use anyhow::{bail, Result};
-use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
+use anyhow::{Result, bail};
+use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 use std::io::{self, Read, Write};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
