@@ -66,7 +66,14 @@ fn render_shell_pane(frame: &mut Frame, app: &App, area: Rect) {
 fn render_logs_pane(frame: &mut Frame, app: &App, area: Rect) {
     let text = app.logs.join("\n");
     let block = Block::default().borders(Borders::ALL).title("Logs");
-    let paragraph = Paragraph::new(text).block(block);
+
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let scroll_offset = app.logs.len().saturating_sub(inner_height);
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .scroll((scroll_offset as u16, 0));
+
     frame.render_widget(paragraph, area);
 }
 
@@ -74,7 +81,7 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let (title, content, style) = match app.bottom_bar_mode {
         BottomBarMode::Tips => {
             let tips = if app.config.is_some() {
-                "Key: [/]Cmd [a]Add [R]Remove [m]Commit [r]Run [b]Build [l]Lint [P]Publish [p]Push [i]Install [q]Clean [c]Cancel [Esc]Quit"
+                "Keys: [/]Cmd [a]Add [R]Remove [m]Commit [r]Run [b]Build [l]Lint [P]Publish [p]Push [i]Install [q]Clean [c]Cancel [Esc]Quit"
             } else {
                 "Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll."
             };
