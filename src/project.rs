@@ -31,6 +31,7 @@ fn get_default_rust_config() -> ClayConfig {
     scripts.insert("lint".to_string(), "cargo fmt --all".to_string());
     scripts.insert("publish".to_string(), "cargo publish".to_string());
     scripts.insert("install".to_string(), "cargo install --path .".to_string());
+    scripts.insert("clean".to_string(), "cargo clean".to_string());
     ClayConfig { scripts }
 }
 

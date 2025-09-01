@@ -66,9 +66,9 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let (title, content, style) = match app.bottom_bar_mode {
         BottomBarMode::Tips => {
             let tips = if app.config.is_some() {
-                "Tips | Keys: [/]Cmd [r]Run [b]Build [l]Lint [p]Pub [i]Install [c]Cancel [Esc]Quit"
+                "[/]Cmd [r]Run [b]Build [l]Lint [p]Pub [i]Install [q]Clean [c]Cancel [Esc]Quit"
             } else {
-                "Tips | Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll."
+                "Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll."
             };
             ("Tips", tips.to_string(), Style::default())
         }

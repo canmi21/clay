@@ -6,7 +6,7 @@ mod shell;
 mod terminal;
 mod ui;
 
-use crate::app::{App, BottomBarMode};
+use crate::app::{App, BottomBarMode, ScriptEndStatus};
 use crate::shell::ShellProcess;
 use crate::ui::ui;
 use anyhow::Result;
@@ -20,6 +20,8 @@ use ratatui::{
     backend::{Backend, CrosstermBackend},
 };
 use std::{io, time::Duration};
+
+const CMD_FINISHED_MARKER: &str = "CLAY_CMD_FINISHED_MARKER_v1";
 
 fn main() -> Result<()> {
     let config = project::load_or_create_config()?;
@@ -36,6 +38,11 @@ fn main() -> Result<()> {
     let shell_pane_inner_width = size.width.saturating_sub(2);
 
     let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height, config);
+    if app.config.is_some() {
+        app.logs.push("Rust detected. Config loaded.".to_string());
+    } else {
+        app.logs.push("No project type detected.".to_string());
+    }
     let mut shell_process = ShellProcess::new(shell_pane_inner_height, shell_pane_inner_width)?;
 
     run_app(&mut terminal, &mut app, &mut shell_process)?;
@@ -56,7 +63,22 @@ fn run_app<B: Backend>(
         terminal.draw(|f| ui(f, app))?;
 
         if let Some(bytes) = shell_process.read_output_bytes() {
-            app.terminal.process_bytes(&bytes);
+            let mut output = String::from_utf8_lossy(&bytes).to_string();
+            let mut script_finished = false;
+
+            if output.contains(CMD_FINISHED_MARKER) {
+                script_finished = true;
+                output = output.replace(CMD_FINISHED_MARKER, "");
+                output = output.trim_end().to_string();
+            }
+
+            if !output.is_empty() {
+                app.terminal.process_bytes(output.as_bytes());
+            }
+
+            if script_finished {
+                app.finish_script(ScriptEndStatus::Finished);
+            }
         }
 
         if event::poll(Duration::from_millis(50))? {
@@ -154,14 +176,15 @@ fn handle_normal_mode_keys(
             KeyCode::Char('l') => execute_script(app, shell, "lint", "Formatting")?,
             KeyCode::Char('p') => execute_script(app, shell, "publish", "Uploading")?,
             KeyCode::Char('i') => execute_script(app, shell, "install", "Installing")?,
+            KeyCode::Char('q') => execute_script(app, shell, "clean", "Cleaning")?,
             KeyCode::Char('c') => {
                 shell.write_to_shell(b"\x03")?;
             }
             _ => {}
         }
     } else if key.code == KeyCode::Char('c') {
-        shell.write_to_shell(b"\x03")?; // Send Ctrl+C
-        app.finish_script();
+        shell.write_to_shell(b"\x03")?;
+        app.finish_script(ScriptEndStatus::Cancelled);
     }
     Ok(())
 }
@@ -175,9 +198,10 @@ fn execute_script(
     if let Some(config) = &app.config {
         if let Some(command) = config.scripts.get(script_name) {
             app.terminal.clear();
-            shell.write_to_shell(format!("{}\n", command).as_bytes())?;
+            let full_command = format!("{}\necho {}\n", command, CMD_FINISHED_MARKER);
+            shell.write_to_shell(full_command.as_bytes())?;
             let message = format!("{} (Press 'c' to cancel)...", status);
-            app.start_script(status, &message);
+            app.start_script(script_name, &message);
         }
     }
     Ok(())

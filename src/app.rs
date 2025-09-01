@@ -11,6 +11,11 @@ pub enum BottomBarMode {
     Status,
 }
 
+pub enum ScriptEndStatus {
+    Finished,
+    Cancelled,
+}
+
 pub struct App {
     pub terminal: VirtualTerminal,
     pub logs: Vec<String>,
@@ -23,13 +28,14 @@ pub struct App {
     pub config: Option<ClayConfig>,
     pub is_script_running: bool,
     pub status_message: String,
+    pub current_script_name: Option<String>,
 }
 
 impl App {
     pub fn new(cols: u16, rows: u16, config: Option<ClayConfig>) -> Self {
         App {
             terminal: VirtualTerminal::new(rows, cols),
-            logs: vec!["Welcome to Clay! Press '/' to enter command mode.".to_string()],
+            logs: vec![],
             bottom_bar_mode: BottomBarMode::Tips,
             should_quit: false,
             command_input: String::new(),
@@ -39,6 +45,7 @@ impl App {
             config,
             is_script_running: false,
             status_message: String::new(),
+            current_script_name: None,
         }
     }
 
@@ -90,18 +97,25 @@ impl App {
         self.bottom_bar_mode = BottomBarMode::Tips;
     }
 
-    pub fn start_script(&mut self, status: &str, message: &str) {
+    pub fn start_script(&mut self, script_name: &str, status_message: &str) {
         self.is_script_running = true;
         self.bottom_bar_mode = BottomBarMode::Status;
-        self.status_message = message.to_string();
-        self.logs.push(format!("Status changed to: {}", status));
+        self.status_message = status_message.to_string();
+        self.current_script_name = Some(script_name.to_string());
+        self.logs
+            .push(format!("Script '{}' running...", script_name));
     }
 
-    pub fn finish_script(&mut self) {
+    pub fn finish_script(&mut self, status: ScriptEndStatus) {
         self.is_script_running = false;
         self.bottom_bar_mode = BottomBarMode::Tips;
         self.status_message.clear();
-        self.logs
-            .push("Script finished or cancelled. Shell is idle.".to_string());
+        if let Some(name) = self.current_script_name.take() {
+            let log_msg = match status {
+                ScriptEndStatus::Finished => format!("Script '{}' finished.", name),
+                ScriptEndStatus::Cancelled => format!("Script '{}' cancelled.", name),
+            };
+            self.logs.push(log_msg);
+        }
     }
 }
