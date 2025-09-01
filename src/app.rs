@@ -16,6 +16,13 @@ pub enum ScriptEndStatus {
     Cancelled,
 }
 
+#[derive(Debug)]
+pub enum InputContext {
+    AddPackage,
+    RemovePackage,
+    CommitMessage,
+}
+
 pub struct App {
     pub terminal: VirtualTerminal,
     pub logs: Vec<String>,
@@ -29,6 +36,7 @@ pub struct App {
     pub is_script_running: bool,
     pub status_message: String,
     pub current_script_name: Option<String>,
+    pub input_context: Option<InputContext>,
 }
 
 impl App {
@@ -46,6 +54,7 @@ impl App {
             is_script_running: false,
             status_message: String::new(),
             current_script_name: None,
+            input_context: None,
         }
     }
 

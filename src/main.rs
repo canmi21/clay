@@ -6,7 +6,7 @@ mod shell;
 mod terminal;
 mod ui;
 
-use crate::app::{App, BottomBarMode, ScriptEndStatus};
+use crate::app::{App, BottomBarMode, InputContext, ScriptEndStatus};
 use crate::shell::ShellProcess;
 use crate::ui::ui;
 use anyhow::Result;
@@ -39,8 +39,7 @@ fn main() -> Result<()> {
 
     let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height, config);
     if app.config.is_some() {
-        app.logs
-            .push("Rust project detected. Config loaded.".to_string());
+        app.logs.push("Rust detected. Config loaded.".to_string());
     } else {
         app.logs.push("No project type detected.".to_string());
     }
@@ -164,23 +163,52 @@ fn handle_input_mode_keys(
 ) -> Result<()> {
     match key.code {
         KeyCode::Enter => {
-            let packages_to_add = app.command_input.trim().to_string();
+            let user_input = app.command_input.trim().to_string();
+            let context = app.input_context.take();
+
             app.command_input.clear();
             app.command_cursor_position = 0;
+            app.bottom_bar_mode = BottomBarMode::Tips;
 
-            if !packages_to_add.is_empty() {
-                let base_cmd_to_run = if let Some(config) = &app.config {
-                    config.scripts.get("add").cloned()
-                } else {
-                    None
-                };
+            if user_input.is_empty() {
+                return Ok(());
+            }
 
-                if let Some(base_cmd) = base_cmd_to_run {
-                    let full_cmd = format!("{} {}", base_cmd, packages_to_add);
-                    run_shell_command(app, shell, "add", &full_cmd, "Adding dependencies")?;
+            if let Some(context) = context {
+                match context {
+                    InputContext::AddPackage => {
+                        let command_to_run = app
+                            .config
+                            .as_ref()
+                            .and_then(|c| c.scripts.get("add").cloned())
+                            .map(|base_cmd| format!("{} {}", base_cmd, user_input));
+
+                        if let Some(command) = command_to_run {
+                            run_shell_command(app, shell, "add", &command, "Adding dependencies")?;
+                        }
+                    }
+                    InputContext::RemovePackage => {
+                        let command_to_run = app
+                            .config
+                            .as_ref()
+                            .and_then(|c| c.scripts.get("remove").cloned())
+                            .map(|base_cmd| format!("{} {}", base_cmd, user_input));
+
+                        if let Some(command) = command_to_run {
+                            run_shell_command(
+                                app,
+                                shell,
+                                "remove",
+                                &command,
+                                "Removing dependencies",
+                            )?;
+                        }
+                    }
+                    InputContext::CommitMessage => {
+                        let command = format!(r#"git add . && git commit -m "{}""#, user_input);
+                        run_shell_command(app, shell, "commit", &command, "Committing")?;
+                    }
                 }
-            } else {
-                app.bottom_bar_mode = BottomBarMode::Tips;
             }
         }
         KeyCode::Char(c) => app.enter_char(c),
@@ -191,6 +219,7 @@ fn handle_input_mode_keys(
             app.command_input.clear();
             app.command_cursor_position = 0;
             app.bottom_bar_mode = BottomBarMode::Tips;
+            app.input_context = None;
         }
         _ => {}
     }
@@ -215,13 +244,27 @@ fn handle_normal_mode_keys(
             KeyCode::Down => app.scroll_down(),
             KeyCode::Char('a') => {
                 app.bottom_bar_mode = BottomBarMode::Input;
+                app.input_context = Some(InputContext::AddPackage);
+                app.command_input.clear();
+                app.command_cursor_position = 0;
+            }
+            KeyCode::Char('R') => {
+                app.bottom_bar_mode = BottomBarMode::Input;
+                app.input_context = Some(InputContext::RemovePackage);
+                app.command_input.clear();
+                app.command_cursor_position = 0;
+            }
+            KeyCode::Char('m') => {
+                app.bottom_bar_mode = BottomBarMode::Input;
+                app.input_context = Some(InputContext::CommitMessage);
                 app.command_input.clear();
                 app.command_cursor_position = 0;
             }
             KeyCode::Char('r') => execute_script(app, shell, "dev", "Running")?,
             KeyCode::Char('b') => execute_script(app, shell, "build", "Building")?,
             KeyCode::Char('l') => execute_script(app, shell, "lint", "Formatting")?,
-            KeyCode::Char('p') => execute_script(app, shell, "publish", "Uploading")?,
+            KeyCode::Char('P') => execute_script(app, shell, "publish", "Publishing")?,
+            KeyCode::Char('p') => run_shell_command(app, shell, "push", "git push", "Pushing")?,
             KeyCode::Char('i') => execute_script(app, shell, "install", "Installing")?,
             KeyCode::Char('q') => execute_script(app, shell, "clean", "Cleaning")?,
             KeyCode::Char('c') => {

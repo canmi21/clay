@@ -1,6 +1,6 @@
 /* src/ui.rs */
 
-use crate::app::{App, BottomBarMode};
+use crate::app::{App, BottomBarMode, InputContext};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
@@ -30,7 +30,13 @@ pub fn ui(frame: &mut Frame, app: &App) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
         BottomBarMode::Input => {
-            let cursor_x = chunks[2].x + 1 + 12 + app.command_cursor_position as u16;
+            let prompt_len = match app.input_context {
+                Some(InputContext::AddPackage) => "Package(s): ".len(),
+                Some(InputContext::RemovePackage) => "Package(s): ".len(),
+                Some(InputContext::CommitMessage) => "Commit Message: ".len(),
+                None => "Input: ".len(),
+            };
+            let cursor_x = chunks[2].x + 1 + prompt_len as u16 + app.command_cursor_position as u16;
             let cursor_y = chunks[2].y + 1;
             frame.set_cursor_position((cursor_x, cursor_y));
         }
@@ -68,9 +74,9 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let (title, content, style) = match app.bottom_bar_mode {
         BottomBarMode::Tips => {
             let tips = if app.config.is_some() {
-                "Keys: [/]Cmd [a]Add [r]Run [b]Build [l]Lint [p]Publish [i]Install [q]Clean [c]Cancel [Esc]Quit"
+                "Key: [/]Cmd [a]Add [R]Remove [m]Commit [r]Run [b]Build [l]Lint [P]Publish [p]Push [i]Install [q]Clean [c]Cancel [Esc]Quit"
             } else {
-                "Tips | Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll."
+                "Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll."
             };
             ("Tips", tips.to_string(), Style::default())
         }
@@ -79,11 +85,19 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             format!("> {}", app.command_input),
             Style::default(),
         ),
-        BottomBarMode::Input => (
-            "Input",
-            format!("Package(s): {}", app.command_input),
-            Style::default(),
-        ),
+        BottomBarMode::Input => {
+            let prompt = match app.input_context {
+                Some(InputContext::AddPackage) => "Package(s): ",
+                Some(InputContext::RemovePackage) => "Package(s): ",
+                Some(InputContext::CommitMessage) => "Commit Message: ",
+                None => "Input: ",
+            };
+            (
+                "Input",
+                format!("{}{}", prompt, app.command_input),
+                Style::default(),
+            )
+        }
         BottomBarMode::Status => (
             "Status",
             app.status_message.clone(),

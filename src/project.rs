@@ -33,6 +33,7 @@ fn get_default_rust_config() -> ClayConfig {
     scripts.insert("install".to_string(), "cargo install --path .".to_string());
     scripts.insert("clean".to_string(), "cargo clean".to_string());
     scripts.insert("add".to_string(), "cargo add".to_string());
+    scripts.insert("remove".to_string(), "cargo remove".to_string());
     ClayConfig { scripts }
 }
 
