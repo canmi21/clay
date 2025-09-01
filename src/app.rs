@@ -35,7 +35,6 @@ impl App {
         }
     }
 
-    // handle scrolling
     pub fn scroll_up(&mut self) {
         self.terminal.scroll_up(1);
     }

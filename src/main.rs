@@ -2,8 +2,8 @@
 
 mod app;
 mod shell;
-mod ui;
 mod terminal;
+mod ui;
 
 use crate::app::{App, BottomBarMode};
 use crate::shell::ShellProcess;
@@ -28,9 +28,7 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let size = terminal.size()?;
-    // Total fixed height for logs (7) and bottom_bar (3) is 10
     let shell_pane_outer_height = size.height.saturating_sub(10);
-    // The inner height/width for the content is 2 less due to borders on all sides.
     let shell_pane_inner_height = shell_pane_outer_height.saturating_sub(2);
     let shell_pane_inner_width = size.width.saturating_sub(2);
 
@@ -91,7 +89,6 @@ fn handle_command_mode_keys(
 ) -> Result<()> {
     match key.code {
         KeyCode::Enter => {
-            // Clear the virtual terminal before executing a new command.
             app.terminal.clear();
             let command = format!("{}\n", app.command_input);
             shell.write_to_shell(command.as_bytes())?;
@@ -145,7 +142,6 @@ fn handle_normal_mode_keys(key: event::KeyEvent, app: &mut App) {
                 app.history_index = app.command_history.len();
             }
         }
-        // Re-enable Up/Down keys for scrolling the shell pane
         KeyCode::Up => app.scroll_up(),
         KeyCode::Down => app.scroll_down(),
         _ => {}

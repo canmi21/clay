@@ -12,7 +12,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(0),
-            Constraint::Length(7), // Set to 7 to have 5 lines of content + 2 for borders
+            Constraint::Length(7),
             Constraint::Length(3),
         ])
         .split(frame.area());
@@ -29,9 +29,7 @@ pub fn ui(frame: &mut Frame, app: &App) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
         BottomBarMode::Tips => {
-            // Show cursor in the shell pane if it's visible
             if let Some((x, y)) = app.terminal.get_cursor_position() {
-                // +1 to account for the border
                 let cursor_x = shell_pane_area.x + 1 + x;
                 let cursor_y = shell_pane_area.y + 1 + y;
                 frame.set_cursor_position((cursor_x, cursor_y));
@@ -40,7 +38,6 @@ pub fn ui(frame: &mut Frame, app: &App) {
             }
         }
         _ => {
-            // Hide cursor in other modes
             frame.set_cursor_position((frame.area().width, frame.area().height));
         }
     }

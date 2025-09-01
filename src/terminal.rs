@@ -51,10 +51,6 @@ impl Grid {
         self.cells.get_mut(row)?.get_mut(col)
     }
 
-    pub fn cell(&self, row: usize, col: usize) -> Option<&Cell> {
-        self.cells.get(row)?.get(col)
-    }
-
     pub fn row(&self, row: usize) -> Option<&[Cell]> {
         self.cells.get(row).map(|r| r.as_slice())
     }
@@ -327,7 +323,6 @@ impl VirtualTerminal {
     }
 
     pub fn scroll_up(&mut self, amount: usize) {
-        // Correctly calculate the maximum scroll offset
         let max_scroll = self
             .state
             .content_bottom_row
@@ -339,7 +334,7 @@ impl VirtualTerminal {
         self.scroll_offset = self.scroll_offset.saturating_sub(amount);
     }
 
-    pub fn get_visible_lines(&self) -> Vec<Line> {
+    pub fn get_visible_lines(&self) -> Vec<Line<'_>> {
         let mut lines = Vec::with_capacity(self.visible_rows as usize);
 
         let viewport_bottom = self.state.content_bottom_row.saturating_sub(self.scroll_offset);

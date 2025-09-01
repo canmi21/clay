@@ -1,7 +1,7 @@
 /* src/shell.rs */
 
 use anyhow::{bail, Result};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize, Child};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use std::io::{self, Read, Write};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use std::thread::{self, JoinHandle};
 pub struct ShellProcess {
     child: Box<dyn Child + Send>,
     writer: Box<dyn Write + Send>,
-    pub reader_thread: Option<JoinHandle<()>>,
+    reader_thread: Option<JoinHandle<()>>,
     pub output_buffer: Arc<Mutex<Vec<u8>>>,
 }
 
@@ -72,7 +72,6 @@ impl ShellProcess {
         self.writer.write_all(data)
     }
 
-    // Vec<u8>
     pub fn read_output_bytes(&self) -> Option<Vec<u8>> {
         let mut buffer_lock = self.output_buffer.lock().unwrap();
         if buffer_lock.is_empty() {
@@ -88,5 +87,8 @@ impl ShellProcess {
 impl Drop for ShellProcess {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        if let Some(handle) = self.reader_thread.take() {
+            let _ = handle.join();
+        }
     }
 }
