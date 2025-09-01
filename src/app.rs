@@ -1,5 +1,6 @@
 /* src/app.rs */
 
+use crate::project::ClayConfig;
 use crate::terminal::VirtualTerminal;
 
 #[derive(PartialEq)]
@@ -7,7 +8,7 @@ pub enum BottomBarMode {
     Tips,
     Command,
     Input,
-    Progress,
+    Status,
 }
 
 pub struct App {
@@ -19,10 +20,13 @@ pub struct App {
     pub command_cursor_position: usize,
     pub command_history: Vec<String>,
     pub history_index: usize,
+    pub config: Option<ClayConfig>,
+    pub is_script_running: bool,
+    pub status_message: String,
 }
 
 impl App {
-    pub fn new(cols: u16, rows: u16) -> Self {
+    pub fn new(cols: u16, rows: u16, config: Option<ClayConfig>) -> Self {
         App {
             terminal: VirtualTerminal::new(rows, cols),
             logs: vec!["Welcome to Clay! Press '/' to enter command mode.".to_string()],
@@ -32,6 +36,9 @@ impl App {
             command_cursor_position: 0,
             command_history: Vec::new(),
             history_index: 0,
+            config,
+            is_script_running: false,
+            status_message: String::new(),
         }
     }
 
@@ -81,5 +88,20 @@ impl App {
         self.command_input.clear();
         self.command_cursor_position = 0;
         self.bottom_bar_mode = BottomBarMode::Tips;
+    }
+
+    pub fn start_script(&mut self, status: &str, message: &str) {
+        self.is_script_running = true;
+        self.bottom_bar_mode = BottomBarMode::Status;
+        self.status_message = message.to_string();
+        self.logs.push(format!("Status changed to: {}", status));
+    }
+
+    pub fn finish_script(&mut self) {
+        self.is_script_running = false;
+        self.bottom_bar_mode = BottomBarMode::Tips;
+        self.status_message.clear();
+        self.logs
+            .push("Script finished or cancelled. Shell is idle.".to_string());
     }
 }

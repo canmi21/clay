@@ -1,6 +1,7 @@
 /* src/main.rs */
 
 mod app;
+mod project;
 mod shell;
 mod terminal;
 mod ui;
@@ -21,6 +22,8 @@ use ratatui::{
 use std::{io, time::Duration};
 
 fn main() -> Result<()> {
+    let config = project::load_or_create_config()?;
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -32,7 +35,7 @@ fn main() -> Result<()> {
     let shell_pane_inner_height = shell_pane_outer_height.saturating_sub(2);
     let shell_pane_inner_width = size.width.saturating_sub(2);
 
-    let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height);
+    let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height, config);
     let mut shell_process = ShellProcess::new(shell_pane_inner_height, shell_pane_inner_width)?;
 
     run_app(&mut terminal, &mut app, &mut shell_process)?;
@@ -70,7 +73,7 @@ fn run_app<B: Backend>(
 
                 match app.bottom_bar_mode {
                     BottomBarMode::Command => handle_command_mode_keys(key, app, shell_process)?,
-                    _ => handle_normal_mode_keys(key, app),
+                    _ => handle_normal_mode_keys(key, app, shell_process)?,
                 }
             }
         }
@@ -130,19 +133,52 @@ fn handle_command_mode_keys(
     Ok(())
 }
 
-fn handle_normal_mode_keys(key: event::KeyEvent, app: &mut App) {
-    match key.code {
-        KeyCode::Esc => app.should_quit = true,
-        KeyCode::Char('/') => {
-            if app.bottom_bar_mode != BottomBarMode::Input
-                && app.bottom_bar_mode != BottomBarMode::Progress
-            {
-                app.bottom_bar_mode = BottomBarMode::Command;
-                app.history_index = app.command_history.len();
+fn handle_normal_mode_keys(
+    key: event::KeyEvent,
+    app: &mut App,
+    shell: &mut ShellProcess,
+) -> Result<()> {
+    if !app.is_script_running {
+        match key.code {
+            KeyCode::Esc => app.should_quit = true,
+            KeyCode::Char('/') => {
+                if app.bottom_bar_mode != BottomBarMode::Input {
+                    app.bottom_bar_mode = BottomBarMode::Command;
+                    app.history_index = app.command_history.len();
+                }
             }
+            KeyCode::Up => app.scroll_up(),
+            KeyCode::Down => app.scroll_down(),
+            KeyCode::Char('r') => execute_script(app, shell, "dev", "Running")?,
+            KeyCode::Char('b') => execute_script(app, shell, "build", "Building")?,
+            KeyCode::Char('l') => execute_script(app, shell, "lint", "Formatting")?,
+            KeyCode::Char('p') => execute_script(app, shell, "publish", "Uploading")?,
+            KeyCode::Char('i') => execute_script(app, shell, "install", "Installing")?,
+            KeyCode::Char('c') => {
+                shell.write_to_shell(b"\x03")?;
+            }
+            _ => {}
         }
-        KeyCode::Up => app.scroll_up(),
-        KeyCode::Down => app.scroll_down(),
-        _ => {}
+    } else if key.code == KeyCode::Char('c') {
+        shell.write_to_shell(b"\x03")?; // Send Ctrl+C
+        app.finish_script();
     }
+    Ok(())
+}
+
+fn execute_script(
+    app: &mut App,
+    shell: &mut ShellProcess,
+    script_name: &str,
+    status: &str,
+) -> Result<()> {
+    if let Some(config) = &app.config {
+        if let Some(command) = config.scripts.get(script_name) {
+            app.terminal.clear();
+            shell.write_to_shell(format!("{}\n", command).as_bytes())?;
+            let message = format!("{} (Press 'c' to cancel)...", status);
+            app.start_script(status, &message);
+        }
+    }
+    Ok(())
 }
