@@ -1,6 +1,5 @@
-/* src/main.rs */
-
 mod app;
+mod lint;
 mod project;
 mod shell;
 mod terminal;
@@ -10,6 +9,7 @@ use crate::app::{App, BottomBarMode, InputContext, ScriptEndStatus};
 use crate::shell::ShellProcess;
 use crate::ui::ui;
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -23,7 +23,33 @@ use std::{io, time::Duration};
 
 const CMD_FINISHED_MARKER: &str = "CLAY_CMD_FINISHED_MARKER_v1";
 
+#[derive(Parser)]
+#[command(
+    name = "clay",
+    version = "1.0",
+    about = "A TUI-based project assistant"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Parser)]
+enum Commands {
+    /// Formats the project files with the clay linter
+    Lint,
+}
+
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::Lint) => lint::run_linter(&std::env::current_dir()?),
+        None => run_tui(),
+    }
+}
+
+fn run_tui() -> Result<()> {
     let config = project::load_or_create_config()?;
 
     enable_raw_mode()?;
@@ -268,7 +294,7 @@ fn handle_normal_mode_keys(
             KeyCode::Char('i') => execute_script(app, shell, "install", "Installing")?,
             KeyCode::Char('q') => execute_script(app, shell, "clean", "Cleaning")?,
             KeyCode::Char('c') => {
-                shell.write_to_shell(b"\x03")?;
+                app.terminal.clear();
             }
             _ => {}
         }

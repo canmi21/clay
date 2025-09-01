@@ -1,5 +1,3 @@
-// src/project.rs
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -21,6 +19,22 @@ pub fn detect_project_type() -> ProjectType {
         ProjectType::Rust
     } else {
         ProjectType::Unknown
+    }
+}
+
+/// Loads the config from `clay-config.json` without creating it or causing side-effects.
+/// Returns `None` if the file doesn't exist or is invalid.
+pub fn load_config() -> anyhow::Result<Option<ClayConfig>> {
+    let config_path = "clay-config.json";
+    if !Path::new(config_path).exists() {
+        return Ok(None);
+    }
+    match fs::read_to_string(config_path) {
+        Ok(content) => match serde_json::from_str::<ClayConfig>(&content) {
+            Ok(config) => Ok(Some(config)),
+            Err(_) => Ok(None),
+        },
+        Err(_) => Ok(None),
     }
 }
 
