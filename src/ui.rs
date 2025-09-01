@@ -3,7 +3,6 @@
 use crate::app::{App, BottomBarMode};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    // 关键改动：移除了不再使用的 Wrap
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
@@ -13,12 +12,13 @@ pub fn ui(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(0),
-            Constraint::Length(5),
+            Constraint::Length(7), // Set to 7 to have 5 lines of content + 2 for borders
             Constraint::Length(3),
         ])
         .split(frame.area());
 
-    render_shell_pane(frame, app, chunks[0]);
+    let shell_pane_area = chunks[0];
+    render_shell_pane(frame, app, shell_pane_area);
     render_logs_pane(frame, app, chunks[1]);
     render_bottom_bar(frame, app, chunks[2]);
 
@@ -28,9 +28,20 @@ pub fn ui(frame: &mut Frame, app: &App) {
             let cursor_y = chunks[2].y + 1;
             frame.set_cursor_position((cursor_x, cursor_y));
         }
+        BottomBarMode::Tips => {
+            // Show cursor in the shell pane if it's visible
+            if let Some((x, y)) = app.terminal.get_cursor_position() {
+                // +1 to account for the border
+                let cursor_x = shell_pane_area.x + 1 + x;
+                let cursor_y = shell_pane_area.y + 1 + y;
+                frame.set_cursor_position((cursor_x, cursor_y));
+            } else {
+                frame.set_cursor_position((frame.area().width, frame.area().height));
+            }
+        }
         _ => {
-            let area = frame.area();
-            frame.set_cursor_position((area.width, area.height));
+            // Hide cursor in other modes
+            frame.set_cursor_position((frame.area().width, frame.area().height));
         }
     }
 }
@@ -53,7 +64,7 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let (title, content) = match app.bottom_bar_mode {
         BottomBarMode::Tips => (
             "Tips",
-            "Press '/' for command mode. 'Esc' to quit.".to_string(),
+            "Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll.".to_string(),
         ),
         BottomBarMode::Command => ("Command", format!("> {}", app.command_input)),
         BottomBarMode::Input => ("Input", String::new()),

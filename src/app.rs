@@ -1,6 +1,5 @@
 /* src/app.rs */
 
-// 导入我们的新模块
 use crate::terminal::VirtualTerminal;
 
 #[derive(PartialEq)]
@@ -12,7 +11,6 @@ pub enum BottomBarMode {
 }
 
 pub struct App {
-    // 关键改动：用 VirtualTerminal 替换旧的 shell_output 和滚动状态
     pub terminal: VirtualTerminal,
     pub logs: Vec<String>,
     pub bottom_bar_mode: BottomBarMode,
@@ -24,7 +22,6 @@ pub struct App {
 }
 
 impl App {
-    // App::new 现在需要知道终端尺寸
     pub fn new(cols: u16, rows: u16) -> Self {
         App {
             terminal: VirtualTerminal::new(rows, cols),
@@ -38,8 +35,15 @@ impl App {
         }
     }
 
-    // add_shell_output 不再需要，逻辑移至 main 循环
-    
+    // handle scrolling
+    pub fn scroll_up(&mut self) {
+        self.terminal.scroll_up(1);
+    }
+
+    pub fn scroll_down(&mut self) {
+        self.terminal.scroll_down(1);
+    }
+
     pub fn move_cursor_left(&mut self) {
         self.command_cursor_position = self.command_cursor_position.saturating_sub(1);
     }
@@ -66,7 +70,7 @@ impl App {
             self.move_cursor_left();
         }
     }
-    
+
     pub fn submit_command(&mut self) {
         let cmd = self.command_input.trim();
         if !cmd.is_empty() {

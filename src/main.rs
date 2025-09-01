@@ -3,7 +3,6 @@
 mod app;
 mod shell;
 mod ui;
-// 添加新模块
 mod terminal;
 
 use crate::app::{App, BottomBarMode};
@@ -28,10 +27,16 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let (cols, rows) = terminal.size().map(|r| (r.width, r.height))?;
-    // App::new 现在需要尺寸
-    let mut app = App::new(cols, rows.saturating_sub(8)); // 减去日志和命令栏高度
-    let mut shell_process = ShellProcess::new(rows.saturating_sub(8), cols)?;
+    let size = terminal.size()?;
+    // Total fixed height for logs (7) and bottom_bar (3) is 10
+    let shell_pane_outer_height = size.height.saturating_sub(10);
+    // The inner height/width for the content is 2 less due to borders on all sides.
+    let shell_pane_inner_height = shell_pane_outer_height.saturating_sub(2);
+    let shell_pane_inner_width = size.width.saturating_sub(2);
+
+    let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height);
+    let mut shell_process =
+        ShellProcess::new(shell_pane_inner_height, shell_pane_inner_width)?;
 
     run_app(&mut terminal, &mut app, &mut shell_process)?;
 
@@ -50,7 +55,6 @@ fn run_app<B: Backend>(
     loop {
         terminal.draw(|f| ui(f, app))?;
 
-        // 关键改动：读取字节并喂给 VTE
         if let Some(bytes) = shell_process.read_output_bytes() {
             app.terminal.process_bytes(&bytes);
         }
@@ -80,7 +84,6 @@ fn run_app<B: Backend>(
     }
 }
 
-// ... handle_command_mode_keys 保持不变 ...
 fn handle_command_mode_keys(
     key: event::KeyEvent,
     app: &mut App,
@@ -88,6 +91,8 @@ fn handle_command_mode_keys(
 ) -> Result<()> {
     match key.code {
         KeyCode::Enter => {
+            // Clear the virtual terminal before executing a new command.
+            app.terminal.clear();
             let command = format!("{}\n", app.command_input);
             shell.write_to_shell(command.as_bytes())?;
             app.submit_command();
@@ -113,7 +118,8 @@ fn handle_command_mode_keys(
             }
         }
         KeyCode::Down => {
-            if !app.command_history.is_empty() && app.history_index < app.command_history.len() - 1 {
+            if !app.command_history.is_empty() && app.history_index < app.command_history.len() - 1
+            {
                 app.history_index += 1;
                 app.command_input = app.command_history[app.history_index].clone();
                 app.command_cursor_position = app.command_input.len();
@@ -128,16 +134,20 @@ fn handle_command_mode_keys(
     Ok(())
 }
 
-// 关键改动：Up/Down 不再需要控制滚动
 fn handle_normal_mode_keys(key: event::KeyEvent, app: &mut App) {
     match key.code {
         KeyCode::Esc => app.should_quit = true,
         KeyCode::Char('/') => {
-            if app.bottom_bar_mode != BottomBarMode::Input && app.bottom_bar_mode != BottomBarMode::Progress {
+            if app.bottom_bar_mode != BottomBarMode::Input
+                && app.bottom_bar_mode != BottomBarMode::Progress
+            {
                 app.bottom_bar_mode = BottomBarMode::Command;
                 app.history_index = app.command_history.len();
             }
         }
-        _ => {} // Up/Down 不再有作用
+        // Re-enable Up/Down keys for scrolling the shell pane
+        KeyCode::Up => app.scroll_up(),
+        KeyCode::Down => app.scroll_down(),
+        _ => {}
     }
 }

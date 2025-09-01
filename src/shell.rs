@@ -26,8 +26,6 @@ impl ShellProcess {
         let shell_program = Self::find_shell()?;
         let mut cmd = CommandBuilder::new(shell_program);
         cmd.cwd(std::env::current_dir()?);
-        // 我们不再需要 TERM=xterm 或 dumb，让它使用默认值
-        
         let child = pair.slave.spawn_command(cmd)?;
         let writer = pair.master.take_writer()?;
         let mut reader = pair.master.try_clone_reader()?;
@@ -64,7 +62,7 @@ impl ShellProcess {
         }
         bail!("No compatible shell found. Please install fish, zsh, bash, or sh.");
     }
-    
+
     #[cfg(windows)]
     fn find_shell() -> Result<String> {
         Ok("powershell.exe".to_string())
@@ -74,7 +72,7 @@ impl ShellProcess {
         self.writer.write_all(data)
     }
 
-    // 关键改动：现在返回原始字节 Vec<u8>
+    // Vec<u8>
     pub fn read_output_bytes(&self) -> Option<Vec<u8>> {
         let mut buffer_lock = self.output_buffer.lock().unwrap();
         if buffer_lock.is_empty() {

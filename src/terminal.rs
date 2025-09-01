@@ -4,6 +4,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use vte::{Parser, Perform};
 
+const SCROLLBACK_BUFFER_SIZE: usize = 500;
+
 #[derive(Clone, Debug)]
 pub struct Cell {
     pub c: char,
@@ -83,8 +85,12 @@ impl Grid {
 
     pub fn scroll_up(&mut self, lines: usize) {
         for _ in 0..lines {
-            self.cells.remove(0);
-            self.cells.push(vec![Cell::default(); self.cols]);
+            self.cells.rotate_left(1);
+            if let Some(last_row) = self.cells.last_mut() {
+                for cell in last_row {
+                    *cell = Cell::default();
+                }
+            }
         }
     }
 }
@@ -93,6 +99,7 @@ pub struct TerminalState {
     grid: Grid,
     cursor_row: usize,
     cursor_col: usize,
+    content_bottom_row: usize,
     current_style: Style,
     saved_cursor: (usize, usize),
 }
@@ -103,42 +110,37 @@ impl TerminalState {
             grid: Grid::new(rows, cols),
             cursor_row: 0,
             cursor_col: 0,
+            content_bottom_row: 0,
             current_style: Style::default(),
             saved_cursor: (0, 0),
         }
     }
 
+    fn update_content_bottom(&mut self) {
+        self.content_bottom_row = self.content_bottom_row.max(self.cursor_row);
+    }
+
     fn write_char(&mut self, c: char) {
-        if self.cursor_row >= self.grid.height() {
-            self.cursor_row = self.grid.height() - 1;
-            self.grid.scroll_up(1);
-        }
-        
         if self.cursor_col >= self.grid.width() {
             self.cursor_row += 1;
             self.cursor_col = 0;
-            if self.cursor_row >= self.grid.height() {
-                self.cursor_row = self.grid.height() - 1;
-                self.grid.scroll_up(1);
-            }
         }
 
-        // Store style values to avoid borrow checker issues
+        if self.cursor_row >= self.grid.height() {
+            let scroll_count = self.cursor_row - self.grid.height() + 1;
+            self.grid.scroll_up(scroll_count);
+            self.cursor_row = self.grid.height() - 1;
+        }
+
+        self.update_content_bottom();
+
         let fg_color = self.ratatui_style_to_color(self.current_style.fg);
         let bg_color = self.ratatui_style_to_color(self.current_style.bg);
         let mut flags = CellFlags::empty();
-        if self.current_style.add_modifier.contains(Modifier::BOLD) {
-            flags |= CellFlags::BOLD;
-        }
-        if self.current_style.add_modifier.contains(Modifier::ITALIC) {
-            flags |= CellFlags::ITALIC;
-        }
-        if self.current_style.add_modifier.contains(Modifier::UNDERLINED) {
-            flags |= CellFlags::UNDERLINE;
-        }
-        if self.current_style.add_modifier.contains(Modifier::REVERSED) {
-            flags |= CellFlags::INVERSE;
-        }
+        if self.current_style.add_modifier.contains(Modifier::BOLD) { flags |= CellFlags::BOLD; }
+        if self.current_style.add_modifier.contains(Modifier::ITALIC) { flags |= CellFlags::ITALIC; }
+        if self.current_style.add_modifier.contains(Modifier::UNDERLINED) { flags |= CellFlags::UNDERLINE; }
+        if self.current_style.add_modifier.contains(Modifier::REVERSED) { flags |= CellFlags::INVERSE; }
 
         if let Some(cell) = self.grid.cell_mut(self.cursor_row, self.cursor_col) {
             cell.c = c;
@@ -146,7 +148,6 @@ impl TerminalState {
             cell.bg = bg_color;
             cell.flags = flags;
         }
-        
         self.cursor_col += 1;
     }
 
@@ -163,135 +164,98 @@ impl Perform for TerminalState {
     fn execute(&mut self, byte: u8) {
         match byte {
             b'\n' => {
-                // Line feed
                 self.cursor_row += 1;
                 if self.cursor_row >= self.grid.height() {
-                    self.cursor_row = self.grid.height() - 1;
                     self.grid.scroll_up(1);
+                    self.cursor_row = self.grid.height() - 1;
                 }
+                self.update_content_bottom();
             }
-            b'\r' => {
-                // Carriage return
-                self.cursor_col = 0;
-            }
+            b'\r' => self.cursor_col = 0,
             b'\t' => {
-                // Tab
                 let tab_stop = 8;
                 let spaces = tab_stop - (self.cursor_col % tab_stop);
-                for _ in 0..spaces {
-                    self.write_char(' ');
-                }
+                for _ in 0..spaces { self.write_char(' '); }
             }
             b'\x08' => {
-                // Backspace
-                if self.cursor_col > 0 {
-                    self.cursor_col -= 1;
-                }
+                if self.cursor_col > 0 { self.cursor_col -= 1; }
             }
             _ => {}
         }
     }
 
     fn hook(&mut self, _params: &vte::Params, _intermediates: &[u8], _ignore: bool, _c: char) {}
-
     fn put(&mut self, _byte: u8) {}
-
     fn unhook(&mut self) {}
-
     fn osc_dispatch(&mut self, _params: &[&[u8]], _bell_terminated: bool) {}
+    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
 
     fn csi_dispatch(&mut self, params: &vte::Params, _intermediates: &[u8], _ignore: bool, c: char) {
         match c {
             'A' => {
-                // Cursor up
                 let lines = params.iter().next().and_then(|p| p.get(0)).unwrap_or(&1);
                 self.cursor_row = self.cursor_row.saturating_sub(*lines as usize);
             }
             'B' => {
-                // Cursor down
                 let lines = params.iter().next().and_then(|p| p.get(0)).unwrap_or(&1);
-                self.cursor_row = (self.cursor_row + *lines as usize).min(self.grid.height() - 1);
+                let max_row = self.grid.height() - 1;
+                self.cursor_row = (self.cursor_row + *lines as usize).min(max_row);
+                self.update_content_bottom();
             }
             'C' => {
-                // Cursor forward
                 let cols = params.iter().next().and_then(|p| p.get(0)).unwrap_or(&1);
-                self.cursor_col = (self.cursor_col + *cols as usize).min(self.grid.width() - 1);
+                let max_col = self.grid.width() - 1;
+                self.cursor_col = (self.cursor_col + *cols as usize).min(max_col);
             }
             'D' => {
-                // Cursor backward
                 let cols = params.iter().next().and_then(|p| p.get(0)).unwrap_or(&1);
                 self.cursor_col = self.cursor_col.saturating_sub(*cols as usize);
             }
             'H' => {
-                // Cursor position
                 let mut iter = params.iter();
                 let row = iter.next().and_then(|p| p.get(0)).unwrap_or(&1).saturating_sub(1) as usize;
                 let col = iter.next().and_then(|p| p.get(0)).unwrap_or(&1).saturating_sub(1) as usize;
                 self.cursor_row = row.min(self.grid.height() - 1);
                 self.cursor_col = col.min(self.grid.width() - 1);
+                self.update_content_bottom();
             }
             'J' => {
-                // Erase display
                 let mode = params.iter().next().and_then(|p| p.get(0)).unwrap_or(&0);
                 match mode {
                     0 => {
-                        // Clear from cursor to end of screen
                         for col in self.cursor_col..self.grid.width() {
-                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
-                                *cell = Cell::default();
-                            }
+                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
                         }
-                        for row in (self.cursor_row + 1)..self.grid.height() {
-                            self.grid.clear_line(row);
-                        }
+                        for row in (self.cursor_row + 1)..self.grid.height() { self.grid.clear_line(row); }
                     }
                     1 => {
-                        // Clear from beginning of screen to cursor
-                        for row in 0..self.cursor_row {
-                            self.grid.clear_line(row);
-                        }
+                        for row in 0..self.cursor_row { self.grid.clear_line(row); }
                         for col in 0..=self.cursor_col {
-                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
-                                *cell = Cell::default();
-                            }
+                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
                         }
                     }
-                    2 => {
-                        // Clear entire screen
-                        self.grid.clear_all();
-                    }
+                    2 => self.grid.clear_all(),
                     _ => {}
                 }
             }
             'K' => {
-                // Erase line
                 let mode = params.iter().next().and_then(|p| p.get(0)).unwrap_or(&0);
                 match mode {
                     0 => {
-                        // Clear from cursor to end of line
                         for col in self.cursor_col..self.grid.width() {
-                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
-                                *cell = Cell::default();
-                            }
+                           if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
                         }
                     }
                     1 => {
-                        // Clear from beginning of line to cursor
                         for col in 0..=self.cursor_col {
-                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) {
-                                *cell = Cell::default();
-                            }
+                            if let Some(cell) = self.grid.cell_mut(self.cursor_row, col) { *cell = Cell::default(); }
                         }
                     }
-                    2 => {
-                        // Clear entire line
-                        self.grid.clear_line(self.cursor_row);
-                    }
+                    2 => self.grid.clear_line(self.cursor_row),
                     _ => {}
                 }
             }
             'm' => {
-                // Set graphics rendition (colors and styles)
                 for param in params.iter() {
                     for &value in param {
                         match value {
@@ -305,45 +269,15 @@ impl Perform for TerminalState {
                             24 => self.current_style = self.current_style.remove_modifier(Modifier::UNDERLINED),
                             27 => self.current_style = self.current_style.remove_modifier(Modifier::REVERSED),
                             30..=37 => {
-                                let color = match value {
-                                    30 => Color::Black,
-                                    31 => Color::Red,
-                                    32 => Color::Green,
-                                    33 => Color::Yellow,
-                                    34 => Color::Blue,
-                                    35 => Color::Magenta,
-                                    36 => Color::Cyan,
-                                    37 => Color::White,
-                                    _ => Color::Reset,
-                                };
+                                let color = match value { 30 => Color::Black, 31 => Color::Red, 32 => Color::Green, 33 => Color::Yellow, 34 => Color::Blue, 35 => Color::Magenta, 36 => Color::Cyan, 37 => Color::White, _ => Color::Reset };
                                 self.current_style = self.current_style.fg(color);
                             }
                             40..=47 => {
-                                let color = match value {
-                                    40 => Color::Black,
-                                    41 => Color::Red,
-                                    42 => Color::Green,
-                                    43 => Color::Yellow,
-                                    44 => Color::Blue,
-                                    45 => Color::Magenta,
-                                    46 => Color::Cyan,
-                                    47 => Color::White,
-                                    _ => Color::Reset,
-                                };
+                                let color = match value { 40 => Color::Black, 41 => Color::Red, 42 => Color::Green, 43 => Color::Yellow, 44 => Color::Blue, 45 => Color::Magenta, 46 => Color::Cyan, 47 => Color::White, _ => Color::Reset };
                                 self.current_style = self.current_style.bg(color);
                             }
                             90..=97 => {
-                                let color = match value {
-                                    90 => Color::DarkGray,
-                                    91 => Color::LightRed,
-                                    92 => Color::LightGreen,
-                                    93 => Color::LightYellow,
-                                    94 => Color::LightBlue,
-                                    95 => Color::LightMagenta,
-                                    96 => Color::LightCyan,
-                                    97 => Color::White,
-                                    _ => Color::Reset,
-                                };
+                                let color = match value { 90 => Color::DarkGray, 91 => Color::LightRed, 92 => Color::LightGreen, 93 => Color::LightYellow, 94 => Color::LightBlue, 95 => Color::LightMagenta, 96 => Color::LightCyan, 97 => Color::White, _ => Color::Reset };
                                 self.current_style = self.current_style.fg(color);
                             }
                             _ => {}
@@ -351,53 +285,72 @@ impl Perform for TerminalState {
                     }
                 }
             }
-            's' => {
-                // Save cursor position
-                self.saved_cursor = (self.cursor_row, self.cursor_col);
-            }
+            's' => self.saved_cursor = (self.cursor_row, self.cursor_col),
             'u' => {
-                // Restore cursor position
                 self.cursor_row = self.saved_cursor.0;
                 self.cursor_col = self.saved_cursor.1;
+                self.update_content_bottom();
             }
             _ => {}
         }
     }
-
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
 }
 
-/// A wrapper around a VTE parser and terminal state.
 pub struct VirtualTerminal {
     state: TerminalState,
     parser: Parser,
+    visible_rows: u16,
+    scroll_offset: usize,
 }
 
 impl VirtualTerminal {
     pub fn new(rows: u16, cols: u16) -> Self {
         Self {
-            state: TerminalState::new(rows as usize, cols as usize),
+            state: TerminalState::new(SCROLLBACK_BUFFER_SIZE, cols as usize),
             parser: Parser::new(),
+            visible_rows: rows,
+            scroll_offset: 0,
         }
     }
 
-    /// Process a byte stream from the PTY and update the terminal state.
+    pub fn clear(&mut self) {
+        self.state.grid.clear_all();
+        self.state.cursor_row = 0;
+        self.state.cursor_col = 0;
+        self.state.content_bottom_row = 0;
+        self.scroll_offset = 0;
+    }
+
     pub fn process_bytes(&mut self, bytes: &[u8]) {
+        self.scroll_offset = 0;
         self.parser.advance(&mut self.state, bytes);
     }
-    
-    /// Get the visible lines from the grid to be rendered by Ratatui.
+
+    pub fn scroll_up(&mut self, amount: usize) {
+        // Correctly calculate the maximum scroll offset
+        let max_scroll = self
+            .state
+            .content_bottom_row
+            .saturating_sub(self.visible_rows.saturating_sub(1) as usize);
+        self.scroll_offset = (self.scroll_offset + amount).min(max_scroll);
+    }
+
+    pub fn scroll_down(&mut self, amount: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+    }
+
     pub fn get_visible_lines(&self) -> Vec<Line> {
-        let mut lines = Vec::with_capacity(self.state.grid.height());
-        for row_idx in 0..self.state.grid.height() {
+        let mut lines = Vec::with_capacity(self.visible_rows as usize);
+
+        let viewport_bottom = self.state.content_bottom_row.saturating_sub(self.scroll_offset);
+        let viewport_top = viewport_bottom.saturating_sub(self.visible_rows.saturating_sub(1) as usize);
+
+        for row_idx in viewport_top..=viewport_bottom {
             if let Some(row) = self.state.grid.row(row_idx) {
                 let mut spans: Vec<Span> = Vec::new();
-                
                 for cell in row {
                     let style = self.cell_to_ratatui_style(cell);
-                    let last_span = spans.last_mut();
-
-                    if let Some(last) = last_span {
+                    if let Some(last) = spans.last_mut() {
                         if last.style == style {
                             last.content.to_mut().push(cell.c);
                             continue;
@@ -411,25 +364,26 @@ impl VirtualTerminal {
         lines
     }
 
-    /// Helper to convert cell style to Ratatui style.
+    pub fn get_cursor_position(&self) -> Option<(u16, u16)> {
+        let viewport_bottom = self.state.content_bottom_row.saturating_sub(self.scroll_offset);
+        let viewport_top = viewport_bottom.saturating_sub(self.visible_rows.saturating_sub(1) as usize);
+
+        if self.state.cursor_row >= viewport_top && self.state.cursor_row <= viewport_bottom {
+            let relative_y = self.state.cursor_row - viewport_top;
+            Some((self.state.cursor_col as u16, relative_y as u16))
+        } else {
+            None
+        }
+    }
+
     fn cell_to_ratatui_style(&self, cell: &Cell) -> Style {
         let mut style = Style::default();
         style = style.fg(cell.fg);
         style = style.bg(cell.bg);
-
-        if cell.flags.contains(CellFlags::BOLD) {
-            style = style.add_modifier(Modifier::BOLD);
-        }
-        if cell.flags.contains(CellFlags::ITALIC) {
-            style = style.add_modifier(Modifier::ITALIC);
-        }
-        if cell.flags.contains(CellFlags::UNDERLINE) {
-            style = style.add_modifier(Modifier::UNDERLINED);
-        }
-        if cell.flags.contains(CellFlags::INVERSE) {
-            style = style.add_modifier(Modifier::REVERSED);
-        }
-
+        if cell.flags.contains(CellFlags::BOLD) { style = style.add_modifier(Modifier::BOLD); }
+        if cell.flags.contains(CellFlags::ITALIC) { style = style.add_modifier(Modifier::ITALIC); }
+        if cell.flags.contains(CellFlags::UNDERLINE) { style = style.add_modifier(Modifier::UNDERLINED); }
+        if cell.flags.contains(CellFlags::INVERSE) { style = style.add_modifier(Modifier::REVERSED); }
         style
     }
 }
