@@ -1,3 +1,5 @@
+/* src/lint.rs */
+
 use crate::project;
 use anyhow::Result;
 use std::fs;
@@ -7,7 +9,7 @@ use walkdir::WalkDir;
 
 /// Runs the full linting process.
 pub fn run_linter(base_path: &Path) -> Result<()> {
-    // Step 1: Execute the user-defined lint command from clay-config.json
+    // Execute the user-defined lint command from clay-config.json
     println!("Executing user-defined lint command...");
     if let Ok(Some(config)) = project::load_config() {
         if let Some(lint_command) = config.scripts.get("lint") {
@@ -34,7 +36,7 @@ pub fn run_linter(base_path: &Path) -> Result<()> {
         );
     }
 
-    // Step 2: Run the custom file header linter
+    // Run the custom file header linter
     println!("\nRunning custom file header linter...");
     for entry in WalkDir::new(base_path)
         .into_iter()

@@ -1,3 +1,5 @@
+/* src/main.rs */
+
 mod app;
 mod lint;
 mod project;
@@ -288,7 +290,7 @@ fn handle_normal_mode_keys(
             }
             KeyCode::Char('r') => execute_script(app, shell, "dev", "Running")?,
             KeyCode::Char('b') => execute_script(app, shell, "build", "Building")?,
-            KeyCode::Char('l') => execute_script(app, shell, "lint", "Formatting")?,
+            KeyCode::Char('l') => run_shell_command(app, shell, "lint", "clay lint", "Formatting")?,
             KeyCode::Char('P') => execute_script(app, shell, "publish", "Publishing")?,
             KeyCode::Char('p') => run_shell_command(app, shell, "push", "git push", "Pushing")?,
             KeyCode::Char('i') => execute_script(app, shell, "install", "Installing")?,
