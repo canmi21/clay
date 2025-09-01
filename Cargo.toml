@@ -1,7 +1,11 @@
 [package]
-name = "clay"
+name = "clay-cli"
 version = "1.0.0"
 edition = "2024"
+
+[[bin]]
+name = "clay"
+path = "src/main.rs"
 
 [dependencies]
 ansi-to-tui = "7"

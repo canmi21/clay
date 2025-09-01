@@ -29,6 +29,11 @@ pub fn ui(frame: &mut Frame, app: &App) {
             let cursor_y = chunks[2].y + 1;
             frame.set_cursor_position((cursor_x, cursor_y));
         }
+        BottomBarMode::Input => {
+            let cursor_x = chunks[2].x + 1 + 12 + app.command_cursor_position as u16;
+            let cursor_y = chunks[2].y + 1;
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
         BottomBarMode::Tips | BottomBarMode::Status => {
             if let Some((x, y)) = app.terminal.get_cursor_position() {
                 let cursor_x = shell_pane_area.x + 1 + x;
@@ -41,9 +46,6 @@ pub fn ui(frame: &mut Frame, app: &App) {
             } else {
                 frame.set_cursor_position((frame.area().width, frame.area().height));
             }
-        }
-        _ => {
-            frame.set_cursor_position((frame.area().width, frame.area().height));
         }
     }
 }
@@ -66,9 +68,9 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let (title, content, style) = match app.bottom_bar_mode {
         BottomBarMode::Tips => {
             let tips = if app.config.is_some() {
-                "[/]Cmd [r]Run [b]Build [l]Lint [p]Pub [i]Install [q]Clean [c]Cancel [Esc]Quit"
+                "Keys: [/]Cmd [a]Add [r]Run [b]Build [l]Lint [p]Publish [i]Install [q]Clean [c]Cancel [Esc]Quit"
             } else {
-                "Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll."
+                "Tips | Press '/' for command mode. 'Esc' to quit. Use Up/Down to scroll."
             };
             ("Tips", tips.to_string(), Style::default())
         }
@@ -77,7 +79,11 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
             format!("> {}", app.command_input),
             Style::default(),
         ),
-        BottomBarMode::Input => ("Input", String::new(), Style::default()),
+        BottomBarMode::Input => (
+            "Input",
+            format!("Package(s): {}", app.command_input),
+            Style::default(),
+        ),
         BottomBarMode::Status => (
             "Status",
             app.status_message.clone(),

@@ -39,7 +39,8 @@ fn main() -> Result<()> {
 
     let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height, config);
     if app.config.is_some() {
-        app.logs.push("Rust detected. Config loaded.".to_string());
+        app.logs
+            .push("Rust project detected. Config loaded.".to_string());
     } else {
         app.logs.push("No project type detected.".to_string());
     }
@@ -95,6 +96,7 @@ fn run_app<B: Backend>(
 
                 match app.bottom_bar_mode {
                     BottomBarMode::Command => handle_command_mode_keys(key, app, shell_process)?,
+                    BottomBarMode::Input => handle_input_mode_keys(key, app, shell_process)?,
                     _ => handle_normal_mode_keys(key, app, shell_process)?,
                 }
             }
@@ -155,6 +157,46 @@ fn handle_command_mode_keys(
     Ok(())
 }
 
+fn handle_input_mode_keys(
+    key: event::KeyEvent,
+    app: &mut App,
+    shell: &mut ShellProcess,
+) -> Result<()> {
+    match key.code {
+        KeyCode::Enter => {
+            let packages_to_add = app.command_input.trim().to_string();
+            app.command_input.clear();
+            app.command_cursor_position = 0;
+
+            if !packages_to_add.is_empty() {
+                let base_cmd_to_run = if let Some(config) = &app.config {
+                    config.scripts.get("add").cloned()
+                } else {
+                    None
+                };
+
+                if let Some(base_cmd) = base_cmd_to_run {
+                    let full_cmd = format!("{} {}", base_cmd, packages_to_add);
+                    run_shell_command(app, shell, "add", &full_cmd, "Adding dependencies")?;
+                }
+            } else {
+                app.bottom_bar_mode = BottomBarMode::Tips;
+            }
+        }
+        KeyCode::Char(c) => app.enter_char(c),
+        KeyCode::Backspace => app.delete_char(),
+        KeyCode::Left => app.move_cursor_left(),
+        KeyCode::Right => app.move_cursor_right(),
+        KeyCode::Esc => {
+            app.command_input.clear();
+            app.command_cursor_position = 0;
+            app.bottom_bar_mode = BottomBarMode::Tips;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn handle_normal_mode_keys(
     key: event::KeyEvent,
     app: &mut App,
@@ -171,6 +213,11 @@ fn handle_normal_mode_keys(
             }
             KeyCode::Up => app.scroll_up(),
             KeyCode::Down => app.scroll_down(),
+            KeyCode::Char('a') => {
+                app.bottom_bar_mode = BottomBarMode::Input;
+                app.command_input.clear();
+                app.command_cursor_position = 0;
+            }
             KeyCode::Char('r') => execute_script(app, shell, "dev", "Running")?,
             KeyCode::Char('b') => execute_script(app, shell, "build", "Building")?,
             KeyCode::Char('l') => execute_script(app, shell, "lint", "Formatting")?,
@@ -189,20 +236,35 @@ fn handle_normal_mode_keys(
     Ok(())
 }
 
+fn run_shell_command(
+    app: &mut App,
+    shell: &mut ShellProcess,
+    script_name: &str,
+    command: &str,
+    status: &str,
+) -> Result<()> {
+    app.terminal.clear();
+    let full_command_with_marker = format!("{}\necho {}\n", command, CMD_FINISHED_MARKER);
+    shell.write_to_shell(full_command_with_marker.as_bytes())?;
+    let message = format!("{} (Press 'c' to cancel)...", status);
+    app.start_script(script_name, &message);
+    Ok(())
+}
+
 fn execute_script(
     app: &mut App,
     shell: &mut ShellProcess,
     script_name: &str,
     status: &str,
 ) -> Result<()> {
-    if let Some(config) = &app.config {
-        if let Some(command) = config.scripts.get(script_name) {
-            app.terminal.clear();
-            let full_command = format!("{}\necho {}\n", command, CMD_FINISHED_MARKER);
-            shell.write_to_shell(full_command.as_bytes())?;
-            let message = format!("{} (Press 'c' to cancel)...", status);
-            app.start_script(script_name, &message);
-        }
+    let command_to_run = if let Some(config) = &app.config {
+        config.scripts.get(script_name).cloned()
+    } else {
+        None
+    };
+
+    if let Some(command) = command_to_run {
+        run_shell_command(app, shell, script_name, &command, status)?;
     }
     Ok(())
 }
