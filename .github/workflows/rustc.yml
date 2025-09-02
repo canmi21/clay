@@ -64,16 +64,35 @@ jobs:
       - name: Read crate metadata
         id: metadata
         run: |
-          name=$(grep '^name =' Cargo.toml | head -n1 | sed 's/.*= "\(.*\)"/\1/')
+          package_name=$(grep '^name =' Cargo.toml | head -n1 | sed 's/.*= "\(.*\)"/\1/')
           version=$(grep '^version =' Cargo.toml | head -n1 | sed 's/.*= "\(.*\)"/\1/')
-          echo "name=$name" >> "$GITHUB_OUTPUT"
+          binary_name=$(grep -A1 '^\[\[bin\]\]' Cargo.toml | grep '^name =' | head -n1 | sed 's/.*= "\(.*\)"/\1/')
+          if [ -z "$binary_name" ]; then
+            binary_name="$package_name"
+          fi
+          echo "package_name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "binary_name=$binary_name" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Package name: $package_name"
+          echo "Binary name: $binary_name"
+          echo "Version: $version"
+
+      - name: List files for debugging
+        run: |
+          echo "Files in target/${{ matrix.target }}/release/:"
+          ls -la target/${{ matrix.target }}/release/ || echo "Directory not found"
 
       - name: Package binary
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf "${{ steps.metadata.outputs.name }}-${{ matrix.target }}.tar.gz" ${{ steps.metadata.outputs.name }}
-          zip "${{ steps.metadata.outputs.name }}-${{ matrix.target }}.zip" ${{ steps.metadata.outputs.name }}
+          if [ ! -f "${{ steps.metadata.outputs.binary_name }}" ]; then
+            echo "Error: Binary file '${{ steps.metadata.outputs.binary_name }}' not found!"
+            echo "Available files:"
+            ls -la
+            exit 1
+          fi
+          tar czf "${{ steps.metadata.outputs.package_name }}-${{ matrix.target }}.tar.gz" "${{ steps.metadata.outputs.binary_name }}"
+          zip "${{ steps.metadata.outputs.package_name }}-${{ matrix.target }}.zip" "${{ steps.metadata.outputs.binary_name }}"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
@@ -81,7 +100,7 @@ jobs:
           tag_name: v${{ steps.metadata.outputs.version }}
           name: v${{ steps.metadata.outputs.version }}
           files: |
-            target/${{ matrix.target }}/release/${{ steps.metadata.outputs.name }}-${{ matrix.target }}.tar.gz
-            target/${{ matrix.target }}/release/${{ steps.metadata.outputs.name }}-${{ matrix.target }}.zip
+            target/${{ matrix.target }}/release/${{ steps.metadata.outputs.package_name }}-${{ matrix.target }}.tar.gz
+            target/${{ matrix.target }}/release/${{ steps.metadata.outputs.package_name }}-${{ matrix.target }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
