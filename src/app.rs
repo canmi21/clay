@@ -2,6 +2,7 @@
 
 use crate::actions::Action;
 use crate::config::{Config, Keybind};
+use crate::history::CommandHistory;
 use crate::project::ProjectConfig;
 use crate::terminal::VirtualTerminal;
 use std::collections::{HashMap, HashSet};
@@ -40,8 +41,7 @@ pub struct App {
     pub should_quit: bool,
     pub command_input: String,
     pub command_cursor_position: usize,
-    pub command_history: Vec<String>,
-    pub history_index: usize,
+    pub command_history: CommandHistory,
     pub config: Config,
     pub project_config: Option<ProjectConfig>,
     pub is_script_running: bool,
@@ -74,6 +74,11 @@ impl App {
                 .then_with(|| a.command_str().cmp(b.command_str()))
         });
 
+        let command_history = CommandHistory::new().unwrap_or_else(|_| {
+            // If history fails to load, create empty one
+            CommandHistory::new().expect("Failed to create command history")
+        });
+
         App {
             terminal: VirtualTerminal::new(rows, cols),
             logs: Vec::new(),
@@ -81,8 +86,7 @@ impl App {
             should_quit: false,
             command_input: String::new(),
             command_cursor_position: 0,
-            command_history: Vec::new(),
-            history_index: 0,
+            command_history,
             config,
             project_config,
             is_script_running: false,
@@ -131,14 +135,29 @@ impl App {
     pub fn submit_command(&mut self) {
         let cmd = self.command_input.trim();
         if !cmd.is_empty() {
-            if self.command_history.last() != Some(&cmd.to_string()) {
-                self.command_history.push(cmd.to_string());
-            }
+            self.command_history.add_command(cmd.to_string());
         }
-        self.history_index = self.command_history.len();
         self.command_input.clear();
         self.command_cursor_position = 0;
         self.bottom_bar_mode = BottomBarMode::Tips;
+    }
+
+    pub fn navigate_history_up(&mut self) {
+        if let Some(command) = self.command_history.navigate_up(&self.command_input) {
+            self.command_input = command;
+            self.command_cursor_position = self.command_input.len();
+        }
+    }
+
+    pub fn navigate_history_down(&mut self) {
+        if let Some(command) = self.command_history.navigate_down() {
+            self.command_input = command;
+            self.command_cursor_position = self.command_input.len();
+        }
+    }
+
+    pub fn reset_history_navigation(&mut self) {
+        self.command_history.reset_navigation();
     }
 
     pub fn start_script(&mut self, name: &str, status_msg: &str) {
@@ -168,10 +187,30 @@ impl App {
         self.key_conflicts.clear();
         let mut char_usage = HashMap::new();
 
-        // Count usage of each character key
+        // Count usage of each character key from both editable and fixed keybindings
         for action in Action::iter() {
-            if let Some(Keybind::Char(c)) = self.config.get_keybind(action) {
-                char_usage.entry(*c).or_insert_with(Vec::new).push(action);
+            let key_char = if action.is_editable() {
+                // For editable actions, get from config
+                if let Some(Keybind::Char(c)) = self.config.get_keybind(action) {
+                    Some(*c)
+                } else {
+                    None
+                }
+            } else {
+                // For fixed actions, get their fixed key
+                match action {
+                    Action::ToggleHelp => Some('h'),
+                    Action::ScrollUp => None, // Arrow keys don't conflict with chars
+                    Action::ScrollDown => None,
+                    Action::EnterCommandMode => Some('/'),
+                    Action::ClearShell => Some('c'),
+                    Action::Quit => None, // Esc doesn't conflict with chars
+                    _ => None,
+                }
+            };
+
+            if let Some(c) = key_char {
+                char_usage.entry(c).or_insert_with(Vec::new).push(action);
             }
         }
 

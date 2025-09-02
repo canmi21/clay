@@ -3,6 +3,7 @@
 mod actions;
 mod app;
 mod config;
+mod history;
 mod lint;
 mod project;
 mod shell;

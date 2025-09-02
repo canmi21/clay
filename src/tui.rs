@@ -140,7 +140,7 @@ fn handle_main_view_keys(
                 }
                 KeyCode::Char('/') => {
                     app.bottom_bar_mode = BottomBarMode::Command;
-                    app.history_index = app.command_history.len();
+                    app.reset_history_navigation();
                 }
                 KeyCode::Up => app.scroll_up(),
                 KeyCode::Down => app.scroll_down(),
@@ -202,11 +202,26 @@ fn handle_command_mode_keys(
                 shell.write_to_shell(command.as_bytes())?;
             }
         }
-        KeyCode::Char(c) => app.enter_char(c),
-        KeyCode::Backspace => app.delete_char(),
+        KeyCode::Up => {
+            app.navigate_history_up();
+        }
+        KeyCode::Down => {
+            app.navigate_history_down();
+        }
+        KeyCode::Char(c) => {
+            app.reset_history_navigation();
+            app.enter_char(c);
+        }
+        KeyCode::Backspace => {
+            app.reset_history_navigation();
+            app.delete_char();
+        }
         KeyCode::Left => app.move_cursor_left(),
         KeyCode::Right => app.move_cursor_right(),
-        KeyCode::Esc => app.bottom_bar_mode = BottomBarMode::Tips,
+        KeyCode::Esc => {
+            app.reset_history_navigation();
+            app.bottom_bar_mode = BottomBarMode::Tips;
+        }
         _ => {}
     }
     Ok(())
