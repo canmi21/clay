@@ -22,7 +22,7 @@ jobs:
       - name: Check if Release Exists
         id: check_release
         run: |
-          RELEASE_URL="https://github.com/rfshub/twig/releases/tag/v${{ steps.read.outputs.version }}"
+          RELEASE_URL="https://github.com/canmi21/clay/releases/tag/v${{ steps.read.outputs.version }}"
           HTTP_STATUS=$(curl -o /dev/null -s -w "%{http_code}" "$RELEASE_URL")
 
           if [ "$HTTP_STATUS" -eq 404 ]; then
