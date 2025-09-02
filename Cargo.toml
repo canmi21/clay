@@ -10,8 +10,8 @@ path = "src/main.rs"
 [dependencies]
 ansi-to-tui = "7"
 anyhow = "1"
-bitflags = "2.9"
-clap = { version = "4.5", features = ["derive"] }
+bitflags = "2"
+clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 directories = "6"
 portable-pty = "0.9"
