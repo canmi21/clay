@@ -2,6 +2,14 @@
 name = "clay-cli"
 version = "1.1.5"
 edition = "2024"
+authors = ["Canmi(Canmi21) <canmicn@gmail.com>"]
+description = "An AI-powered developer assistant and TUI to streamline your git and project workflows."
+license = "MIT"
+repository = "https://github.com/canmi21/clay"
+homepage = "https://github.com/canmi21/clay"
+readme = "README.md"
+keywords = ["cli", "tui", "dev-tool", "git", "ai"]
+categories = ["command-line-utilities", "developer-tools"]
 
 [[bin]]
 name = "clay"
