@@ -18,7 +18,7 @@ struct FileCommit {
 
 /// Runs the full AI-powered commit and version bump process.
 pub fn run_ai_commit() -> Result<()> {
-    println!("- Step 1: Generating AI commit messages...");
+    println!("Starting LLM diff...");
     let llm_output = Command::new(std::env::current_exe()?)
         .arg("llm")
         .arg("commit")
@@ -32,7 +32,7 @@ pub fn run_ai_commit() -> Result<()> {
 
     let llm_output_str = String::from_utf8_lossy(&llm_output.stdout);
 
-    // Robustly parse the JSON from the output
+    println!("Analysing commit messages...");
     let commit_data_result: Result<AiCommitResponse, _> =
         if let (Some(start), Some(end)) = (llm_output_str.find('{'), llm_output_str.rfind('}')) {
             let json_str = &llm_output_str[start..=end];
@@ -45,14 +45,10 @@ pub fn run_ai_commit() -> Result<()> {
         };
 
     if let Ok(commit_data) = commit_data_result {
-        if commit_data.commits.is_empty() {
-            println!(
-                "  - No changes detected by LLM. Checking for other changes before versioning..."
-            );
-        } else {
-            println!("- Step 2: Committing changes based on AI suggestions...");
+        if !commit_data.commits.is_empty() {
+            println!("Calling Git toolchain...");
             for commit in commit_data.commits {
-                println!("  - Committing '{}': {}", commit.file, commit.message);
+                println!("  {} -> {}", commit.file, commit.message);
 
                 let add_status = Command::new("git")
                     .arg("add")
@@ -73,11 +69,8 @@ pub fn run_ai_commit() -> Result<()> {
                     .ok();
             }
         }
-    } else {
-        println!("  - Could not parse LLM response, skipping individual commits.");
     }
 
-    println!("- Step 3: Bumping project version...");
     let version_output = Command::new(std::env::current_exe()?)
         .arg("project")
         .arg("update")
@@ -97,8 +90,9 @@ pub fn run_ai_commit() -> Result<()> {
         } else {
             ("version", "new_version")
         };
+    println!("Bumping version {} -> {}", old_version, new_version);
 
-    println!("- Step 4: Creating final version commit...");
+    println!("Creating version commit...");
     Command::new("git")
         .arg("add")
         .arg(".")
@@ -106,7 +100,7 @@ pub fn run_ai_commit() -> Result<()> {
         .context("Failed to stage final changes")?;
 
     let final_commit_message = format!("chore: update {} -> {}", old_version, new_version);
-    let final_commit_status = Command::new("git")
+    Command::new("git")
         .arg("commit")
         .arg("-m")
         .arg(&final_commit_message)
@@ -114,13 +108,6 @@ pub fn run_ai_commit() -> Result<()> {
         .stderr(Stdio::null())
         .status()?;
 
-    if final_commit_status.success() {
-        println!("  - {}", final_commit_message);
-    } else {
-        println!("  - No remaining changes to commit for version update.");
-    }
-
-    println!("AI commit process finished successfully.");
     Ok(())
 }
 
@@ -128,7 +115,7 @@ pub fn run_ai_commit() -> Result<()> {
 pub fn run_ai_push() -> Result<()> {
     run_ai_commit()?;
 
-    println!("- Step 5: Pushing to remote...");
+    println!("Pushing changes to remote...");
     let push_status = Command::new("git")
         .arg("push")
         .status()
@@ -138,6 +125,5 @@ pub fn run_ai_push() -> Result<()> {
         bail!("'git push' failed.");
     }
 
-    println!("Push successful.");
     Ok(())
 }
