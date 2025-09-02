@@ -36,6 +36,10 @@ pub enum Action {
     AddPackage,
     RemovePackage,
     Commit,
+    LlmPush,
+    ShowDiff,
+    GenerateMessage,
+    VersionUpdate,
 }
 
 impl Action {
@@ -57,6 +61,10 @@ impl Action {
             Action::AddPackage => "Add a new dependency",
             Action::RemovePackage => "Remove a dependency",
             Action::Commit => "Commit all staged changes",
+            Action::LlmPush => "Run the full AI commit and push process",
+            Action::ShowDiff => "Show the git diff as JSON",
+            Action::GenerateMessage => "Generate commit messages with AI",
+            Action::VersionUpdate => "Increment patch version",
         }
     }
 
@@ -78,6 +86,10 @@ impl Action {
             Action::AddPackage => "/add",
             Action::RemovePackage => "/remove",
             Action::Commit => "/commit",
+            Action::LlmPush => "/llm",
+            Action::ShowDiff => "/diff",
+            Action::GenerateMessage => "/message",
+            Action::VersionUpdate => "/ver",
         }
     }
 
