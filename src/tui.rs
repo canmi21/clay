@@ -128,7 +128,6 @@ fn handle_main_view_keys(
 ) -> Result<()> {
     match app.bottom_bar_mode {
         BottomBarMode::Tips => {
-            // Handle all shortcuts for Tips mode here.
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 app.should_quit = true;
                 return Ok(());
@@ -156,7 +155,6 @@ fn handle_main_view_keys(
             }
         }
         BottomBarMode::Status => {
-            // In status mode, only Ctrl+C to cancel is allowed.
             if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                 shell.write_to_shell(b"\x03")?;
                 app.finish_script(ScriptEndStatus::Cancelled);
@@ -183,7 +181,6 @@ fn handle_command_mode_keys(
             app.submit_command();
 
             if input.starts_with('/') {
-                // Internal command
                 let parts = input.split_whitespace();
                 let command_str = parts.into_iter().next().unwrap_or("");
 
@@ -196,7 +193,6 @@ fn handle_command_mode_keys(
                     dispatch_action(Action::Quit, app, shell)?;
                 }
             } else {
-                // External command
                 app.terminal.clear();
                 let command = format!("{}\n", input);
                 shell.write_to_shell(command.as_bytes())?;
@@ -313,14 +309,11 @@ fn handle_help_mode_keys(key: event::KeyEvent, app: &mut App) -> Result<()> {
 
 fn attempt_close_help(app: &mut App) -> Result<()> {
     if app.validate_and_prepare_to_close_help() {
-        // No conflicts, can close immediately
         if let Err(e) = app.config.save() {
-            // Log the error but don't crash
             app.logs
                 .push(format!("Warning: Failed to save config: {}", e));
         }
     }
-    // If there are conflicts, validate_and_prepare_to_close_help() will set show_conflict_dialog = true
     Ok(())
 }
 
@@ -355,11 +348,9 @@ fn handle_conflict_dialog_keys(key: event::KeyEvent, app: &mut App) -> Result<()
             }
             HelpConflictDialogSelection::Inspect => {
                 app.show_conflict_dialog = false;
-                // Stay in help mode to show conflicts highlighted in red
             }
         },
         KeyCode::Esc => {
-            // Cancel the dialog and stay in help mode
             app.show_conflict_dialog = false;
         }
         _ => {}
@@ -370,10 +361,13 @@ fn handle_conflict_dialog_keys(key: event::KeyEvent, app: &mut App) -> Result<()
 fn dispatch_action(action: Action, app: &mut App, shell: &mut ShellProcess) -> Result<()> {
     match action {
         Action::Quit => app.should_quit = true,
-        Action::ToggleHelp => app.show_help = !app.show_help,
+        Action::ToggleHelp => app.show_help = true,
         Action::ScrollUp => app.scroll_up(),
         Action::ScrollDown => app.scroll_down(),
-        Action::EnterCommandMode => app.bottom_bar_mode = BottomBarMode::Command,
+        Action::EnterCommandMode => {
+            app.bottom_bar_mode = BottomBarMode::Command;
+            app.reset_history_navigation();
+        }
         Action::ClearShell => app.terminal.clear(),
         Action::AddPackage => {
             app.bottom_bar_mode = BottomBarMode::Input;
@@ -389,6 +383,20 @@ fn dispatch_action(action: Action, app: &mut App, shell: &mut ShellProcess) -> R
         }
         Action::Lint => run_shell_command(app, shell, "lint", "clay lint", "Formatting")?,
         Action::Push => run_shell_command(app, shell, "push", "git push", "Pushing")?,
+        Action::LlmPush => {
+            run_shell_command(app, shell, "llm-push", "clay llm push", "AI Pushing")?
+        }
+        Action::ShowDiff => run_shell_command(app, shell, "diff", "clay diff", "Diffing")?,
+        Action::GenerateMessage => {
+            run_shell_command(app, shell, "message", "clay llm commit", "Generating")?
+        }
+        Action::VersionUpdate => run_shell_command(
+            app,
+            shell,
+            "ver-update",
+            "clay project update",
+            "Versioning",
+        )?,
 
         Action::Run => execute_project_script(app, shell, "dev", "Running")?,
         Action::Build => execute_project_script(app, shell, "build", "Building")?,
@@ -409,7 +417,7 @@ fn run_shell_command(
     app.terminal.clear();
     let full_command_with_marker = format!("{}\necho {}\n", command, CMD_FINISHED_MARKER);
     shell.write_to_shell(full_command_with_marker.as_bytes())?;
-    let message = format!("{} (Press 'c' to cancel)...", status);
+    let message = format!("{} (Press Ctrl+c to cancel)...", status);
     app.start_script(script_name, &message);
     Ok(())
 }
