@@ -8,6 +8,18 @@ At its core, Clay is a high-fidelity terminal emulator that ensures your favorit
 
 Clay is built around two core components: an interactive TUI for day-to-day operations and a set of powerful CLI commands for automation and scripting.
 
+<div align="center">
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/clay.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/build.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/cancel.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/lint.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/command.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/commit.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/fun.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/help.png" alt="clay" width="99%"/></a>
+<a href="https://github.com/canmi21/clay" target="_blank"><img src="https://raw.githubusercontent.com/canmi21/clay/refs/heads/main/img/clay-config.png" alt="clay" width="99%"/></a>
+</div>
+
 ### The Interactive TUI: A True Shell Experience
 
 Launch the TUI by simply running `clay` in your project's root directory. The TUI is designed to be a robust replacement for a standard terminal session.
