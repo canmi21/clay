@@ -9,7 +9,7 @@ repository = "https://github.com/canmi21/clay"
 homepage = "https://github.com/canmi21/clay"
 readme = "README.md"
 keywords = ["cli", "tui", "dev-tool", "git", "ai"]
-categories = ["command-line-utilities", "developer-tools"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "clay"
