@@ -1,6 +1,8 @@
 /* src/tui.rs */
 
-use crate::app::{App, BottomBarMode, InputContext, ScriptEndStatus};
+use crate::actions::Action;
+use crate::app::{App, BottomBarMode, HelpConflictDialogSelection, InputContext, ScriptEndStatus};
+use crate::config::{Config, Keybind};
 use crate::project;
 use crate::shell::ShellProcess;
 use crate::ui::ui;
@@ -8,46 +10,64 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    },
 };
 use ratatui::{
     Terminal,
     backend::{Backend, CrosstermBackend},
 };
-use std::{io, time::Duration};
+use std::{collections::HashMap, time::Duration};
+use strum::IntoEnumIterator;
 
 const CMD_FINISHED_MARKER: &str = "CLAY_CMD_FINISHED_MARKER_v1";
 
 /// Initializes and runs the terminal user interface.
 pub fn run_tui() -> Result<()> {
-    let config = project::load_or_create_config()?;
+    let config = Config::new()?;
+    let project_config = project::load_or_create_config()?;
 
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
+    let mut stdout = std::io::stdout();
+
+    // Clear the terminal before entering alternate screen
+    execute!(stdout, Clear(ClearType::All))?;
     execute!(stdout, EnterAlternateScreen)?;
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
 
     let size = terminal.size()?;
     let shell_pane_outer_height = size.height.saturating_sub(10);
     let shell_pane_inner_height = shell_pane_outer_height.saturating_sub(2);
     let shell_pane_inner_width = size.width.saturating_sub(2);
 
-    let mut app = App::new(shell_pane_inner_width, shell_pane_inner_height, config);
-    if app.config.is_some() {
-        app.logs.push("Rust detected. Config loaded.".to_string());
+    let mut app = App::new(
+        shell_pane_inner_width,
+        shell_pane_inner_height,
+        config,
+        project_config,
+    );
+    if app.project_config.is_some() {
+        app.logs
+            .push("Rust project detected. Config loaded.".to_string());
     } else {
         app.logs.push("No project type detected.".to_string());
     }
+
     let mut shell_process = ShellProcess::new(shell_pane_inner_height, shell_pane_inner_width)?;
 
-    run_app(&mut terminal, &mut app, &mut shell_process)?;
+    let result = run_app(&mut terminal, &mut app, &mut shell_process);
 
+    // Cleanup
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    Ok(())
+    result
 }
 
 /// The main application loop.
@@ -83,30 +103,14 @@ fn run_app<B: Backend>(
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-
-                if app.show_help {
-                    // When help is shown, only specific keys close it
-                    if (key.code == KeyCode::Char('c')
-                        && key.modifiers.contains(KeyModifiers::CONTROL))
-                        || key.code == KeyCode::Esc
-                        || key.code == KeyCode::Char('h')
-                    {
-                        app.show_help = false;
-                    }
-                } else if key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
-                    // Global quit hotkey, only active when help is not shown
-                    app.should_quit = true;
+                if app.show_conflict_dialog {
+                    handle_conflict_dialog_keys(key, app)?;
+                } else if app.is_editing_keybinding {
+                    handle_help_edit_mode_keys(key, app);
+                } else if app.show_help {
+                    handle_help_mode_keys(key, app)?;
                 } else {
-                    // Regular key handling when help is not shown
-                    match app.bottom_bar_mode {
-                        BottomBarMode::Command => {
-                            handle_command_mode_keys(key, app, shell_process)?
-                        }
-                        BottomBarMode::Input => handle_input_mode_keys(key, app, shell_process)?,
-                        _ => handle_normal_mode_keys(key, app, shell_process)?,
-                    }
+                    handle_main_view_keys(key, app, shell_process)?;
                 }
             }
         }
@@ -117,7 +121,57 @@ fn run_app<B: Backend>(
     }
 }
 
-/// Handles key events when in command mode.
+fn handle_main_view_keys(
+    key: event::KeyEvent,
+    app: &mut App,
+    shell: &mut ShellProcess,
+) -> Result<()> {
+    match app.bottom_bar_mode {
+        BottomBarMode::Tips => {
+            // Handle all shortcuts for Tips mode here.
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                app.should_quit = true;
+                return Ok(());
+            }
+
+            match key.code {
+                KeyCode::Char('h') => {
+                    app.show_help = true;
+                }
+                KeyCode::Char('/') => {
+                    app.bottom_bar_mode = BottomBarMode::Command;
+                    app.history_index = app.command_history.len();
+                }
+                KeyCode::Up => app.scroll_up(),
+                KeyCode::Down => app.scroll_down(),
+                KeyCode::Esc => {
+                    app.should_quit = true;
+                }
+                KeyCode::Char(c) => {
+                    if let Some(action) = app.config.get_action_for_key(c) {
+                        dispatch_action(action, app, shell)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        BottomBarMode::Status => {
+            // In status mode, only Ctrl+C to cancel is allowed.
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                shell.write_to_shell(b"\x03")?;
+                app.finish_script(ScriptEndStatus::Cancelled);
+            }
+        }
+        BottomBarMode::Command => {
+            handle_command_mode_keys(key, app, shell)?;
+        }
+        BottomBarMode::Input => {
+            handle_input_mode_keys(key, app, shell)?;
+        }
+    }
+    Ok(())
+}
+
 fn handle_command_mode_keys(
     key: event::KeyEvent,
     app: &mut App,
@@ -125,43 +179,39 @@ fn handle_command_mode_keys(
 ) -> Result<()> {
     match key.code {
         KeyCode::Enter => {
-            app.terminal.clear();
-            let command = format!("{}\n", app.command_input);
-            shell.write_to_shell(command.as_bytes())?;
+            let input = app.command_input.trim().to_string();
             app.submit_command();
+
+            if input.starts_with('/') {
+                // Internal command
+                let parts = input.split_whitespace();
+                let command_str = parts.into_iter().next().unwrap_or("");
+
+                let action_map: HashMap<&str, Action> =
+                    Action::iter().map(|a| (a.command_str(), a)).collect();
+
+                if let Some(action) = action_map.get(command_str) {
+                    dispatch_action(*action, app, shell)?;
+                } else if command_str == "/exit" {
+                    dispatch_action(Action::Quit, app, shell)?;
+                }
+            } else {
+                // External command
+                app.terminal.clear();
+                let command = format!("{}\n", input);
+                shell.write_to_shell(command.as_bytes())?;
+            }
         }
-        KeyCode::Char(c) => {
-            app.enter_char(c);
-        }
+        KeyCode::Char(c) => app.enter_char(c),
         KeyCode::Backspace => app.delete_char(),
         KeyCode::Left => app.move_cursor_left(),
         KeyCode::Right => app.move_cursor_right(),
         KeyCode::Esc => app.bottom_bar_mode = BottomBarMode::Tips,
-        KeyCode::Up => {
-            if !app.command_history.is_empty() {
-                app.history_index = app.history_index.saturating_sub(1);
-                app.command_input = app.command_history[app.history_index].clone();
-                app.command_cursor_position = app.command_input.len();
-            }
-        }
-        KeyCode::Down => {
-            if !app.command_history.is_empty() && app.history_index < app.command_history.len() - 1
-            {
-                app.history_index += 1;
-                app.command_input = app.command_history[app.history_index].clone();
-                app.command_cursor_position = app.command_input.len();
-            } else {
-                app.history_index = app.command_history.len();
-                app.command_input.clear();
-                app.command_cursor_position = 0;
-            }
-        }
         _ => {}
     }
     Ok(())
 }
 
-/// Handles key events when in input mode.
 fn handle_input_mode_keys(
     key: event::KeyEvent,
     app: &mut App,
@@ -181,38 +231,24 @@ fn handle_input_mode_keys(
             }
 
             if let Some(context) = context {
-                match context {
-                    InputContext::AddPackage => {
-                        let command_to_run = app
-                            .config
-                            .as_ref()
-                            .and_then(|c| c.scripts.get("add").cloned())
-                            .map(|base_cmd| format!("{} {}", base_cmd, user_input));
+                let (script_name, status) = match context {
+                    InputContext::AddPackage => ("add", "Adding dependencies"),
+                    InputContext::RemovePackage => ("remove", "Removing dependencies"),
+                    InputContext::CommitMessage => ("commit", "Committing"),
+                };
 
-                        if let Some(command) = command_to_run {
-                            run_shell_command(app, shell, "add", &command, "Adding dependencies")?;
-                        }
-                    }
-                    InputContext::RemovePackage => {
-                        let command_to_run = app
-                            .config
-                            .as_ref()
-                            .and_then(|c| c.scripts.get("remove").cloned())
-                            .map(|base_cmd| format!("{} {}", base_cmd, user_input));
+                if context == InputContext::CommitMessage {
+                    let command = format!(r#"git add . && git commit -m "{}""#, user_input);
+                    run_shell_command(app, shell, "commit", &command, status)?;
+                } else {
+                    let command_to_run = app
+                        .project_config
+                        .as_ref()
+                        .and_then(|c| c.scripts.get(script_name).cloned())
+                        .map(|base_cmd| format!("{} {}", base_cmd, user_input));
 
-                        if let Some(command) = command_to_run {
-                            run_shell_command(
-                                app,
-                                shell,
-                                "remove",
-                                &command,
-                                "Removing dependencies",
-                            )?;
-                        }
-                    }
-                    InputContext::CommitMessage => {
-                        let command = format!(r#"git add . && git commit -m "{}""#, user_input);
-                        run_shell_command(app, shell, "commit", &command, "Committing")?;
+                    if let Some(command) = command_to_run {
+                        run_shell_command(app, shell, script_name, &command, status)?;
                     }
                 }
             }
@@ -232,62 +268,122 @@ fn handle_input_mode_keys(
     Ok(())
 }
 
-/// Handles key events when in normal (tips) mode.
-fn handle_normal_mode_keys(
-    key: event::KeyEvent,
-    app: &mut App,
-    shell: &mut ShellProcess,
-) -> Result<()> {
-    if !app.is_script_running {
-        match key.code {
-            KeyCode::Esc => app.should_quit = true,
-            KeyCode::Char('/') => {
-                if app.bottom_bar_mode != BottomBarMode::Input {
-                    app.bottom_bar_mode = BottomBarMode::Command;
-                    app.history_index = app.command_history.len();
-                }
-            }
-            KeyCode::Up => app.scroll_up(),
-            KeyCode::Down => app.scroll_down(),
-            KeyCode::Char('h') => app.show_help = true,
-            KeyCode::Char('a') => {
-                app.bottom_bar_mode = BottomBarMode::Input;
-                app.input_context = Some(InputContext::AddPackage);
-                app.command_input.clear();
-                app.command_cursor_position = 0;
-            }
-            KeyCode::Char('R') => {
-                app.bottom_bar_mode = BottomBarMode::Input;
-                app.input_context = Some(InputContext::RemovePackage);
-                app.command_input.clear();
-                app.command_cursor_position = 0;
-            }
-            KeyCode::Char('m') => {
-                app.bottom_bar_mode = BottomBarMode::Input;
-                app.input_context = Some(InputContext::CommitMessage);
-                app.command_input.clear();
-                app.command_cursor_position = 0;
-            }
-            KeyCode::Char('r') => execute_script(app, shell, "dev", "Running")?,
-            KeyCode::Char('b') => execute_script(app, shell, "build", "Building")?,
-            KeyCode::Char('l') => run_shell_command(app, shell, "lint", "clay lint", "Formatting")?,
-            KeyCode::Char('P') => execute_script(app, shell, "publish", "Publishing")?,
-            KeyCode::Char('p') => run_shell_command(app, shell, "push", "git push", "Pushing")?,
-            KeyCode::Char('i') => execute_script(app, shell, "install", "Installing")?,
-            KeyCode::Char('q') => execute_script(app, shell, "clean", "Cleaning")?,
-            KeyCode::Char('c') => {
-                app.terminal.clear();
-            }
-            _ => {}
+fn handle_help_mode_keys(key: event::KeyEvent, app: &mut App) -> Result<()> {
+    let num_actions = app.sorted_actions.len();
+
+    match key.code {
+        KeyCode::Up => {
+            app.help_selected_action_index = app.help_selected_action_index.saturating_sub(1);
         }
-    } else if key.code == KeyCode::Char('c') {
-        shell.write_to_shell(b"\x03")?;
-        app.finish_script(ScriptEndStatus::Cancelled);
+        KeyCode::Down => {
+            app.help_selected_action_index =
+                (app.help_selected_action_index + 1).min(num_actions - 1);
+        }
+        KeyCode::Enter | KeyCode::Char(' ') => {
+            let selected_action = app.sorted_actions[app.help_selected_action_index];
+            if selected_action.is_editable() {
+                app.is_editing_keybinding = true;
+            }
+        }
+        KeyCode::Esc | KeyCode::Char('h') => {
+            attempt_close_help(app)?;
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            attempt_close_help(app)?;
+        }
+        _ => {}
     }
     Ok(())
 }
 
-/// A helper function to run a command in the shell.
+fn attempt_close_help(app: &mut App) -> Result<()> {
+    if app.validate_and_prepare_to_close_help() {
+        // No conflicts, can close immediately
+        if let Err(e) = app.config.save() {
+            // Log the error but don't crash
+            app.logs
+                .push(format!("Warning: Failed to save config: {}", e));
+        }
+    }
+    // If there are conflicts, validate_and_prepare_to_close_help() will set show_conflict_dialog = true
+    Ok(())
+}
+
+fn handle_help_edit_mode_keys(key: event::KeyEvent, app: &mut App) {
+    let selected_action = app.sorted_actions[app.help_selected_action_index];
+
+    let new_keybind = match key.code {
+        KeyCode::Char(c) if c.is_ascii_alphanumeric() => Some(Keybind::Char(c)),
+        KeyCode::Esc => Some(Keybind::None),
+        _ => None,
+    };
+
+    if let Some(keybind) = new_keybind {
+        app.config.set_keybind(selected_action, keybind);
+        app.is_editing_keybinding = false;
+    }
+}
+
+fn handle_conflict_dialog_keys(key: event::KeyEvent, app: &mut App) -> Result<()> {
+    match key.code {
+        KeyCode::Left => app.conflict_dialog_selection = HelpConflictDialogSelection::Unbind,
+        KeyCode::Right => app.conflict_dialog_selection = HelpConflictDialogSelection::Inspect,
+        KeyCode::Enter => match app.conflict_dialog_selection {
+            HelpConflictDialogSelection::Unbind => {
+                app.unbind_conflicting_keys();
+                app.show_conflict_dialog = false;
+                app.show_help = false;
+                if let Err(e) = app.config.save() {
+                    app.logs
+                        .push(format!("Warning: Failed to save config: {}", e));
+                }
+            }
+            HelpConflictDialogSelection::Inspect => {
+                app.show_conflict_dialog = false;
+                // Stay in help mode to show conflicts highlighted in red
+            }
+        },
+        KeyCode::Esc => {
+            // Cancel the dialog and stay in help mode
+            app.show_conflict_dialog = false;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn dispatch_action(action: Action, app: &mut App, shell: &mut ShellProcess) -> Result<()> {
+    match action {
+        Action::Quit => app.should_quit = true,
+        Action::ToggleHelp => app.show_help = !app.show_help,
+        Action::ScrollUp => app.scroll_up(),
+        Action::ScrollDown => app.scroll_down(),
+        Action::EnterCommandMode => app.bottom_bar_mode = BottomBarMode::Command,
+        Action::ClearShell => app.terminal.clear(),
+        Action::AddPackage => {
+            app.bottom_bar_mode = BottomBarMode::Input;
+            app.input_context = Some(InputContext::AddPackage);
+        }
+        Action::RemovePackage => {
+            app.bottom_bar_mode = BottomBarMode::Input;
+            app.input_context = Some(InputContext::RemovePackage);
+        }
+        Action::Commit => {
+            app.bottom_bar_mode = BottomBarMode::Input;
+            app.input_context = Some(InputContext::CommitMessage);
+        }
+        Action::Lint => run_shell_command(app, shell, "lint", "clay lint", "Formatting")?,
+        Action::Push => run_shell_command(app, shell, "push", "git push", "Pushing")?,
+
+        Action::Run => execute_project_script(app, shell, "dev", "Running")?,
+        Action::Build => execute_project_script(app, shell, "build", "Building")?,
+        Action::Publish => execute_project_script(app, shell, "publish", "Publishing")?,
+        Action::Install => execute_project_script(app, shell, "install", "Installing")?,
+        Action::Clean => execute_project_script(app, shell, "clean", "Cleaning")?,
+    }
+    Ok(())
+}
+
 fn run_shell_command(
     app: &mut App,
     shell: &mut ShellProcess,
@@ -303,14 +399,13 @@ fn run_shell_command(
     Ok(())
 }
 
-/// A helper function to execute a script from the config file.
-fn execute_script(
+fn execute_project_script(
     app: &mut App,
     shell: &mut ShellProcess,
     script_name: &str,
     status: &str,
 ) -> Result<()> {
-    let command_to_run = if let Some(config) = &app.config {
+    let command_to_run = if let Some(config) = &app.project_config {
         config.scripts.get(script_name).cloned()
     } else {
         None

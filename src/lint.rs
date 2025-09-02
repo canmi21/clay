@@ -3,104 +3,93 @@
 use crate::project;
 use anyhow::Result;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::Command;
 use walkdir::WalkDir;
 
-/// Runs the full linting process.
-pub fn run_linter(base_path: &Path) -> Result<()> {
-    // Step 1: Execute the user-defined lint command from clay-config.json
-    println!("Executing user-defined lint command...");
-    if let Ok(Some(config)) = project::load_config() {
-        if let Some(lint_command) = config.scripts.get("lint") {
-            println!("> {}", lint_command);
+pub fn run_linter() -> Result<()> {
+    let base_path = std::env::current_dir()?;
+    println!("Starting linter in: {}", base_path.display());
+
+    // 1. Run user-defined lint command from clay-config.json
+    if let Some(project_config) = project::load_config()? {
+        if let Some(lint_command) = project_config.scripts.get("lint") {
+            println!("- Running user-defined lint command: '{}'...", lint_command);
             let mut parts = lint_command.split_whitespace();
-            if let Some(program) = parts.next() {
-                let status = Command::new(program)
-                    .args(parts)
-                    .current_dir(base_path)
-                    .status()?;
-                if !status.success() {
-                    eprintln!(
-                        "Warning: User-defined lint command failed with status: {}",
-                        status
-                    );
+            let program = parts.next().unwrap_or("");
+            let args: Vec<&str> = parts.collect();
+
+            if !program.is_empty() {
+                let fmt_status = Command::new(program).args(args).status()?;
+                if !fmt_status.success() {
+                    println!("  User lint command failed. Aborting header updates.");
+                    return Ok(());
                 }
+                println!("  User lint command completed successfully.");
             }
-        } else {
-            println!("No 'lint' script found in clay-config.json.");
         }
-    } else {
-        println!(
-            "Could not load clay-config.json or it's invalid, skipping user-defined lint command."
-        );
     }
 
-    // Step 2: Run the custom file header linter
-    println!("\nRunning custom file header linter...");
-    for entry in WalkDir::new(base_path)
+    // 2. Walk directory and update file headers
+    println!("- Checking and updating file headers...");
+    for entry in WalkDir::new(&base_path)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| !e.path().to_string_lossy().contains("target/"))
+        .filter(|e| e.path().extension().map_or(false, |ext| ext == "rs"))
     {
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            if let Ok(relative_path) = path.strip_prefix(base_path) {
-                process_file(path, relative_path)?;
-            }
+        let file_path = entry.path();
+        if let Ok(relative_path) = file_path.strip_prefix(&base_path) {
+            update_file_header(file_path, relative_path)?;
         }
     }
-    println!("Linting complete.");
+    println!("Linting process finished.");
     Ok(())
 }
 
-/// Processes a single file to ensure it has the correct header comment and a blank line.
-fn process_file(file_path: &Path, relative_path: &Path) -> Result<()> {
-    let content = fs::read_to_string(file_path)?;
-    let mut new_lines: Vec<String> = content.lines().map(String::from).collect();
+fn update_file_header(file_path: &Path, relative_path: &Path) -> Result<()> {
+    let file = fs::File::open(file_path)?;
+    let reader = BufReader::new(file);
+    let mut lines: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
 
-    // Use forward slashes for consistency, even on Windows
-    let expected_comment = format!(
-        "/* {} */",
-        relative_path.display().to_string().replace('\\', "/")
-    );
+    let header_comment = format!("/* {} */", relative_path.display());
+    let mut needs_update = false;
 
-    let mut needs_write = false;
+    if lines.is_empty() {
+        lines.insert(0, header_comment);
+        lines.insert(1, String::new());
+        needs_update = true;
+    } else {
+        let first_line = &lines[0];
+        if first_line != &header_comment {
+            if first_line.trim().starts_with("/*") || first_line.trim().starts_with("//") {
+                lines.remove(0);
+            }
+            lines.insert(0, header_comment);
+            needs_update = true;
+        }
 
-    // Check and fix the header comment on the first line
-    if new_lines.is_empty() || new_lines[0] != expected_comment {
-        if !new_lines.is_empty() && new_lines[0].starts_with("/*") && new_lines[0].ends_with("*/") {
-            // It looks like a header comment, but the content is wrong. Replace it.
-            new_lines[0] = expected_comment;
+        if lines.len() == 1 {
+            lines.push(String::new());
+            needs_update = true;
         } else {
-            // No header comment found, insert it at the beginning.
-            new_lines.insert(0, expected_comment);
+            let second_line = lines[1].trim();
+            if !second_line.is_empty()
+                && !second_line.starts_with("//")
+                && !second_line.starts_with("/*")
+            {
+                lines.insert(1, String::new());
+                needs_update = true;
+            }
         }
-        needs_write = true;
     }
 
-    // Check for a blank line after the header comment
-    let needs_blank_line = match new_lines.get(1) {
-        None => true, // File only had a header (or was empty), so it needs a blank line.
-        Some(line) => {
-            // It needs a blank line if it's not empty and not a comment.
-            !line.trim().is_empty()
-                && !line.trim().starts_with("//")
-                && !line.trim().starts_with("/*")
-        }
-    };
-
-    if needs_blank_line {
-        new_lines.insert(1, String::new());
-        needs_write = true;
-    }
-
-    if needs_write {
+    if needs_update {
         println!("  - Updating header for: {}", relative_path.display());
-        let new_content = new_lines.join("\n");
-        // Always end the file with a newline for POSIX compliance
-        fs::write(file_path, new_content + "\n")?;
+        let mut file = fs::File::create(file_path)?;
+        for line in lines {
+            writeln!(file, "{}", line)?;
+        }
     }
-
     Ok(())
 }

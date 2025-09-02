@@ -1,6 +1,8 @@
 /* src/main.rs */
 
+mod actions;
 mod app;
+mod config;
 mod lint;
 mod project;
 mod shell;
@@ -9,30 +11,33 @@ mod tui;
 mod ui;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(
-    name = "clay",
-    version = "1.0",
-    about = "A TUI-based project assistant"
-)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
-#[derive(Parser)]
+#[derive(Subcommand)]
 enum Commands {
-    /// Formats the project files with the clay linter
+    /// Lint and format rust files with header comments
     Lint,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    match cli.command {
-        Some(Commands::Lint) => lint::run_linter(&std::env::current_dir()?),
-        None => tui::run_tui(),
+    match &cli.command {
+        Some(Commands::Lint) => {
+            lint::run_linter()?;
+        }
+        None => {
+            tui::run_tui()?;
+        }
     }
+
+    Ok(())
 }

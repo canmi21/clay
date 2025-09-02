@@ -1,12 +1,14 @@
 /* src/ui.rs */
 
-use crate::app::{App, BottomBarMode, InputContext};
+use crate::actions::Action;
+use crate::app::{App, BottomBarMode, HelpConflictDialogSelection, InputContext};
+use crate::config::Keybind;
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap},
 };
 
 pub fn ui(frame: &mut Frame, app: &App) {
@@ -19,43 +21,17 @@ pub fn ui(frame: &mut Frame, app: &App) {
         ])
         .split(frame.area());
 
-    let shell_pane_area = chunks[0];
-    render_shell_pane(frame, app, shell_pane_area);
+    render_shell_pane(frame, app, chunks[0]);
     render_logs_pane(frame, app, chunks[1]);
     render_bottom_bar(frame, app, chunks[2]);
-
-    match app.bottom_bar_mode {
-        BottomBarMode::Command | BottomBarMode::Input => {
-            let prompt_offset = match app.bottom_bar_mode {
-                BottomBarMode::Command => 2, // for "> "
-                BottomBarMode::Input => match app.input_context {
-                    Some(InputContext::AddPackage) => "Package(s): ".len(),
-                    Some(InputContext::RemovePackage) => "Package(s): ".len(),
-                    Some(InputContext::CommitMessage) => "Message: ".len(),
-                    None => 0,
-                },
-                _ => 0,
-            };
-
-            let cursor_x =
-                chunks[2].x + 1 + prompt_offset as u16 + app.command_cursor_position as u16;
-            let cursor_y = chunks[2].y + 1;
-            frame.set_cursor(cursor_x, cursor_y);
-        }
-        BottomBarMode::Tips => {
-            if let Some((x, y)) = app.terminal.get_cursor_position() {
-                let cursor_x = shell_pane_area.x + 1 + x;
-                let cursor_y = shell_pane_area.y + 1 + y;
-                frame.set_cursor(cursor_x, cursor_y);
-            }
-        }
-        _ => {
-            // Do not set cursor, effectively hiding it
-        }
-    }
+    update_cursor(frame, app, chunks[0], chunks[2]);
 
     if app.show_help {
-        render_help_popup(frame);
+        if app.show_conflict_dialog {
+            render_conflict_dialog(frame, app);
+        } else {
+            render_help_settings_screen(frame, app);
+        }
     }
 }
 
@@ -85,12 +61,41 @@ fn render_logs_pane(frame: &mut Frame, app: &App, area: Rect) {
 fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     let (title, content) = match app.bottom_bar_mode {
         BottomBarMode::Tips => {
-            let tips_text = if app.config.is_some() {
-                "[/]Cmd [a]Add [R]Remove [r]Run [b]Build [l]Lint [P]Publish [p]Push [m]Commit [i]Install [q]Clean [c]Clear [h]Help [Esc]Quit"
-            } else {
-                "[/]Cmd [h]Help [Esc]Quit"
-            };
-            ("Tips", tips_text.to_string())
+            let mut tips = vec!["[/]Cmd".to_string()];
+            let tip_map = [
+                (Action::AddPackage, "Add"),
+                (Action::RemovePackage, "Remove"),
+                (Action::Run, "Run"),
+                (Action::Build, "Build"),
+                (Action::Lint, "Lint"),
+                (Action::Publish, "Publish"),
+                (Action::Push, "Push"),
+                (Action::Commit, "Commit"),
+                (Action::Install, "Install"),
+                (Action::Clean, "Clean"),
+            ];
+
+            for (action, name) in tip_map {
+                let key_char = app
+                    .config
+                    .get_keybind(action)
+                    .and_then(|kb| {
+                        if let Keybind::Char(c) = kb {
+                            Some(*c)
+                        } else {
+                            None
+                        }
+                    })
+                    .map_or(' ', |c| c);
+                tips.push(format!("[{}]{}", key_char, name));
+            }
+
+            // Fixed shortcuts at the end
+            tips.push("[c]Cancel".to_string());
+            tips.push("[h]Help".to_string());
+            tips.push("[Esc]Quit".to_string());
+
+            ("Tips", tips.join(" "))
         }
         BottomBarMode::Command => ("Command", format!("> {}", app.command_input)),
         BottomBarMode::Input => {
@@ -110,59 +115,159 @@ fn render_bottom_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_help_popup(frame: &mut Frame) {
-    let block = Block::default().title("Help").borders(Borders::ALL);
+fn update_cursor(frame: &mut Frame, app: &App, shell_area: Rect, bottom_bar_area: Rect) {
+    if app.show_help {
+        return; // No cursor in help mode
+    }
+
+    match app.bottom_bar_mode {
+        BottomBarMode::Command | BottomBarMode::Input => {
+            let prompt_offset = match app.bottom_bar_mode {
+                BottomBarMode::Command => 2, // for "> "
+                BottomBarMode::Input => match app.input_context {
+                    Some(InputContext::AddPackage) | Some(InputContext::RemovePackage) => {
+                        "Package(s): ".len()
+                    }
+                    Some(InputContext::CommitMessage) => "Message: ".len(),
+                    None => 0,
+                },
+                _ => 0,
+            };
+
+            let cursor_x =
+                bottom_bar_area.x + 1 + prompt_offset as u16 + app.command_cursor_position as u16;
+            let cursor_y = bottom_bar_area.y + 1;
+            frame.set_cursor_position((cursor_x, cursor_y));
+        }
+        BottomBarMode::Tips => {
+            if let Some((x, y)) = app.terminal.get_cursor_position() {
+                let cursor_x = shell_area.x + 1 + x;
+                let cursor_y = shell_area.y + 1 + y;
+                frame.set_cursor_position((cursor_x, cursor_y));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn render_help_settings_screen(frame: &mut Frame, app: &App) {
+    let area = centered_rect(80, 90, frame.area());
+
+    let header_cells = ["Command", "Description", "Keybinding"]
+        .iter()
+        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Yellow)));
+    let header = Row::new(header_cells).height(1);
+
+    let rows = app.sorted_actions.iter().enumerate().map(|(i, &action)| {
+        let is_selected = i == app.help_selected_action_index;
+
+        if !action.is_editable() {
+            let keybind_str = action.fixed_keybinding_display().unwrap_or("[N/A]");
+            Row::new(vec![
+                Cell::from(action.command_str()),
+                Cell::from(action.description()),
+                Cell::from(Span::styled(
+                    keybind_str,
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+        } else {
+            let keybind = app.config.get_keybind(action).unwrap_or(&Keybind::None);
+            let keybind_str = match keybind {
+                Keybind::Char(c) => format!("[{}]", c),
+                Keybind::None => "[None]".to_string(),
+            };
+
+            let mut keybind_style = Style::default().fg(Color::Cyan);
+            if let Keybind::Char(c) = keybind {
+                if app.key_conflicts.contains(c) {
+                    keybind_style = keybind_style.fg(Color::Red).add_modifier(Modifier::BOLD);
+                }
+            }
+
+            if is_selected && app.is_editing_keybinding {
+                keybind_style = keybind_style.bg(Color::White).fg(Color::Black);
+            }
+
+            Row::new(vec![
+                Cell::from(action.command_str()),
+                Cell::from(action.description()),
+                Cell::from(Span::styled(keybind_str, keybind_style)),
+            ])
+        }
+    });
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(15),
+            Constraint::Min(40),
+            Constraint::Length(12),
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Help & Keybindings"),
+    )
+    .row_highlight_style(Style::default().bg(Color::DarkGray));
+
+    frame.render_widget(Clear, area);
+    let mut table_state =
+        ratatui::widgets::TableState::default().with_selected(app.help_selected_action_index);
+    frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn render_conflict_dialog(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 30, frame.area());
+    let block = Block::default()
+        .title("Keybinding Conflicts Detected")
+        .borders(Borders::ALL);
+
+    let conflict_keys: Vec<String> = app.key_conflicts.iter().map(|c| c.to_string()).collect();
+    let conflicts_text = if conflict_keys.is_empty() {
+        "No conflicts".to_string()
+    } else {
+        format!("Conflicting keys: {}", conflict_keys.join(", "))
+    };
+
+    let unbind_style = if app.conflict_dialog_selection == HelpConflictDialogSelection::Unbind {
+        Style::default().bg(Color::White).fg(Color::Black)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let inspect_style = if app.conflict_dialog_selection == HelpConflictDialogSelection::Inspect {
+        Style::default().bg(Color::White).fg(Color::Black)
+    } else {
+        Style::default().fg(Color::White)
+    };
 
     let text = Text::from(vec![
-        Line::from(Span::styled(
-            "--- General ---",
-            Style::default().fg(Color::Yellow),
-        )),
-        Line::from("[/]       Enter Command Mode"),
-        Line::from("[h]       Toggle this help popup"),
-        Line::from("[Up/Down] Scroll shell output"),
-        Line::from("[Esc]     Quit application or close popup"),
+        Line::from("Multiple actions are using the same keys!"),
         Line::from(""),
-        Line::from(Span::styled(
-            "--- Project (Rust) ---",
-            Style::default().fg(Color::Yellow),
-        )),
-        Line::from("[r]       Run dev build (cargo run)"),
-        Line::from("[b]       Build project (cargo build)"),
-        Line::from("[l]       Lint & Format (clay lint)"),
-        Line::from("[P]       Publish crate (cargo publish)"),
-        Line::from("[i]       Install binary (cargo install)"),
-        Line::from("[q]       Clean build artifacts (cargo clean)"),
+        Line::from(conflicts_text),
         Line::from(""),
-        Line::from(Span::styled(
-            "--- Package Management ---",
-            Style::default().fg(Color::Yellow),
-        )),
-        Line::from("[a]       Add dependency (cargo add)"),
-        Line::from("[R]       Remove dependency (cargo remove)"),
+        Line::from("Choose an option:"),
         Line::from(""),
-        Line::from(Span::styled(
-            "--- Git ---",
-            Style::default().fg(Color::Yellow),
-        )),
-        Line::from("[m]       Commit all changes"),
-        Line::from("[p]       Push to remote"),
+        Line::from(vec![
+            Span::styled("[ Unbind Conflicts ]", unbind_style),
+            Span::raw("  "),
+            Span::styled("[ Inspect ]", inspect_style),
+        ]),
         Line::from(""),
-        Line::from(Span::styled(
-            "--- Interaction ---",
-            Style::default().fg(Color::Yellow),
-        )),
-        Line::from("[c]       Clear shell (Normal) / Cancel script (Running)"),
+        Line::from("Use ← → to select, Enter to confirm, Esc to cancel"),
     ]);
 
-    let area = centered_rect(60, 80, frame.area());
-    let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(ratatui::layout::Alignment::Center);
 
-    frame.render_widget(Clear, area); //this clears the background
+    frame.render_widget(Clear, area);
     frame.render_widget(paragraph, area);
 }
 
-/// helper function to create a centered rect using up certain percentage of the available rect `r`
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)

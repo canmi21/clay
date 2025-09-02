@@ -36,3 +36,5 @@ pkg
 *.njsproj
 *.sln
 *.sw?
+
+# clay
