@@ -2,10 +2,12 @@
 
 mod actions;
 mod app;
+mod commit;
 mod config;
 mod diff;
 mod history;
 mod lint;
+mod llm;
 mod project;
 mod shell;
 mod terminal;
@@ -33,6 +35,9 @@ enum Commands {
     /// Manage project versioning
     #[command(subcommand)]
     Project(ProjectCommands),
+    /// Interact with LLM for commit message generation
+    #[command(subcommand)]
+    Llm(LlmCommands),
 }
 
 #[derive(Subcommand)]
@@ -43,19 +48,33 @@ pub enum ProjectCommands {
     Bump,
 }
 
+#[derive(Subcommand)]
+pub enum LlmCommands {
+    /// Set the Gemini API token
+    Token,
+    /// Generate commit messages based on git diff
+    Commit,
+    /// Generate and apply AI commits, then bump version
+    Git,
+    /// Run the AI commit process and push to remote
+    Push,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Some(Commands::Lint) => {
-            lint::run_linter()?;
-        }
-        Some(Commands::Diff) => {
-            diff::run_diff()?;
-        }
+        Some(Commands::Lint) => lint::run_linter()?,
+        Some(Commands::Diff) => diff::run_diff()?,
         Some(Commands::Project(project_cmd)) => match project_cmd {
             ProjectCommands::Update => version::version_update()?,
             ProjectCommands::Bump => version::version_bump()?,
+        },
+        Some(Commands::Llm(llm_cmd)) => match llm_cmd {
+            LlmCommands::Token => llm::set_token()?,
+            LlmCommands::Commit => llm::generate_commit_messages()?,
+            LlmCommands::Git => commit::run_ai_commit()?,
+            LlmCommands::Push => commit::run_ai_push()?,
         },
         None => {
             tui::run_tui()?;
