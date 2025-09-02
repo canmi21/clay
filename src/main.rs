@@ -3,6 +3,7 @@
 mod actions;
 mod app;
 mod config;
+mod diff;
 mod history;
 mod lint;
 mod project;
@@ -25,20 +26,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Lint and format rust files with header comments
+    /// Lint and format project files
     Lint,
+    /// Show the git diff as JSON
+    Diff,
     /// Manage project versioning
-    Project {
-        #[command(subcommand)]
-        command: ProjectCommands,
-    },
+    #[command(subcommand)]
+    Project(ProjectCommands),
 }
 
 #[derive(Subcommand)]
-enum ProjectCommands {
-    /// Increment the patch version (e.g., 0.1.0 -> 0.1.1)
+pub enum ProjectCommands {
+    /// Increment patch version (e.g., 1.0.0 -> 1.0.1)
     Update,
-    /// Increment the minor version and reset patch (e.g., 0.1.0 -> 0.2.0)
+    /// Increment minor version (e.g., 1.0.1 -> 1.1.0)
     Bump,
 }
 
@@ -49,7 +50,10 @@ fn main() -> Result<()> {
         Some(Commands::Lint) => {
             lint::run_linter()?;
         }
-        Some(Commands::Project { command }) => match command {
+        Some(Commands::Diff) => {
+            diff::run_diff()?;
+        }
+        Some(Commands::Project(project_cmd)) => match project_cmd {
             ProjectCommands::Update => version::version_update()?,
             ProjectCommands::Bump => version::version_bump()?,
         },
