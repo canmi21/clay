@@ -22,6 +22,7 @@ bitflags = "2"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"
 directories = "6"
+openssl = { version = "0.10", optional = true, features = ["vendored"] }
 portable-pty = "0.9"
 ratatui = "0.29"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
@@ -34,3 +35,7 @@ strum_macros = "0.27"
 tokio = { version = "1", features = ["full"] }
 vte = { version = "0.15", features = ["ansi"] }
 walkdir = "2.5"
+
+[features]
+default = []
+musl-vendored = ["dep:openssl"]
