@@ -1,7 +1,6 @@
 /* src/app.rs */
 
-use crate::project::ClayConfig;
-use crate::terminal::VirtualTerminal;
+use crate::project::ProjectConfig;
 
 #[derive(PartialEq)]
 pub enum BottomBarMode {
@@ -11,20 +10,19 @@ pub enum BottomBarMode {
     Status,
 }
 
-pub enum ScriptEndStatus {
-    Finished,
-    Cancelled,
-}
-
-#[derive(Debug)]
 pub enum InputContext {
     AddPackage,
     RemovePackage,
     CommitMessage,
 }
 
+pub enum ScriptEndStatus {
+    Finished,
+    Cancelled,
+}
+
 pub struct App {
-    pub terminal: VirtualTerminal,
+    pub terminal: crate::terminal::VirtualTerminal,
     pub logs: Vec<String>,
     pub bottom_bar_mode: BottomBarMode,
     pub should_quit: bool,
@@ -32,18 +30,19 @@ pub struct App {
     pub command_cursor_position: usize,
     pub command_history: Vec<String>,
     pub history_index: usize,
-    pub config: Option<ClayConfig>,
+    pub config: Option<ProjectConfig>,
     pub is_script_running: bool,
+    pub running_script_name: String,
     pub status_message: String,
-    pub current_script_name: Option<String>,
     pub input_context: Option<InputContext>,
+    pub show_help: bool,
 }
 
 impl App {
-    pub fn new(cols: u16, rows: u16, config: Option<ClayConfig>) -> Self {
+    pub fn new(cols: u16, rows: u16, config: Option<ProjectConfig>) -> Self {
         App {
-            terminal: VirtualTerminal::new(rows, cols),
-            logs: vec![],
+            terminal: crate::terminal::VirtualTerminal::new(rows, cols),
+            logs: Vec::new(),
             bottom_bar_mode: BottomBarMode::Tips,
             should_quit: false,
             command_input: String::new(),
@@ -52,9 +51,10 @@ impl App {
             history_index: 0,
             config,
             is_script_running: false,
+            running_script_name: String::new(),
             status_message: String::new(),
-            current_script_name: None,
             input_context: None,
+            show_help: false,
         }
     }
 
@@ -106,25 +106,26 @@ impl App {
         self.bottom_bar_mode = BottomBarMode::Tips;
     }
 
-    pub fn start_script(&mut self, script_name: &str, status_message: &str) {
+    pub fn start_script(&mut self, name: &str, status_message: &str) {
         self.is_script_running = true;
-        self.bottom_bar_mode = BottomBarMode::Status;
+        self.running_script_name = name.to_string();
         self.status_message = status_message.to_string();
-        self.current_script_name = Some(script_name.to_string());
+        self.bottom_bar_mode = BottomBarMode::Status;
         self.logs
-            .push(format!("Script '{}' running...", script_name));
+            .push(format!("Script '{}' running...", self.running_script_name));
     }
 
     pub fn finish_script(&mut self, status: ScriptEndStatus) {
+        let log_message = match status {
+            ScriptEndStatus::Finished => format!("Script '{}' finished.", self.running_script_name),
+            ScriptEndStatus::Cancelled => {
+                format!("Script '{}' cancelled.", self.running_script_name)
+            }
+        };
+        self.logs.push(log_message);
         self.is_script_running = false;
-        self.bottom_bar_mode = BottomBarMode::Tips;
+        self.running_script_name.clear();
         self.status_message.clear();
-        if let Some(name) = self.current_script_name.take() {
-            let log_msg = match status {
-                ScriptEndStatus::Finished => format!("Script '{}' finished.", name),
-                ScriptEndStatus::Cancelled => format!("Script '{}' cancelled.", name),
-            };
-            self.logs.push(log_msg);
-        }
+        self.bottom_bar_mode = BottomBarMode::Tips;
     }
 }

@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 
 /// Runs the full linting process.
 pub fn run_linter(base_path: &Path) -> Result<()> {
-    // Execute the user-defined lint command from clay-config.json
+    // Step 1: Execute the user-defined lint command from clay-config.json
     println!("Executing user-defined lint command...");
     if let Ok(Some(config)) = project::load_config() {
         if let Some(lint_command) = config.scripts.get("lint") {
@@ -36,7 +36,7 @@ pub fn run_linter(base_path: &Path) -> Result<()> {
         );
     }
 
-    // Run the custom file header linter
+    // Step 2: Run the custom file header linter
     println!("\nRunning custom file header linter...");
     for entry in WalkDir::new(base_path)
         .into_iter()
@@ -96,7 +96,7 @@ fn process_file(file_path: &Path, relative_path: &Path) -> Result<()> {
     }
 
     if needs_write {
-        println!("  - Updating header for: {}", file_path.display());
+        println!("  - Updating header for: {}", relative_path.display());
         let new_content = new_lines.join("\n");
         // Always end the file with a newline for POSIX compliance
         fs::write(file_path, new_content + "\n")?;
