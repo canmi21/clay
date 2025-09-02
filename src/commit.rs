@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
+use std::io;
 use std::process::{Command, Stdio};
 
 #[derive(Deserialize, Debug)]
@@ -29,8 +30,21 @@ pub fn run_ai_commit() -> Result<()> {
         bail!("'clay llm commit' failed:\n{}", stderr);
     }
 
-    let llm_json_str = String::from_utf8_lossy(&llm_output.stdout);
-    if let Ok(commit_data) = serde_json::from_str::<AiCommitResponse>(&llm_json_str) {
+    let llm_output_str = String::from_utf8_lossy(&llm_output.stdout);
+
+    // Robustly parse the JSON from the output
+    let commit_data_result: Result<AiCommitResponse, _> =
+        if let (Some(start), Some(end)) = (llm_output_str.find('{'), llm_output_str.rfind('}')) {
+            let json_str = &llm_output_str[start..=end];
+            serde_json::from_str(json_str)
+        } else {
+            Err(serde_json::Error::io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Could not find JSON object in LLM response",
+            )))
+        };
+
+    if let Ok(commit_data) = commit_data_result {
         if commit_data.commits.is_empty() {
             println!(
                 "  - No changes detected by LLM. Checking for other changes before versioning..."
@@ -40,7 +54,6 @@ pub fn run_ai_commit() -> Result<()> {
             for commit in commit_data.commits {
                 println!("  - Committing '{}': {}", commit.file, commit.message);
 
-                // git add <file>
                 let add_status = Command::new("git")
                     .arg("add")
                     .arg(&commit.file)
@@ -50,7 +63,6 @@ pub fn run_ai_commit() -> Result<()> {
                     bail!("'git add {}' failed.", commit.file);
                 }
 
-                // git commit -m <message>
                 Command::new("git")
                     .arg("commit")
                     .arg("-m")
