@@ -51,9 +51,17 @@ pub fn run_tui() -> Result<()> {
         config,
         project_config,
     );
-    if app.project_config.is_some() {
-        app.logs
-            .push("Rust project detected. Config loaded.".to_string());
+
+    // Updated project detection logic for logging
+    if let Some(p_config) = &app.project_config {
+        if p_config.scripts.get("dev") == Some(&"pnpm dev".to_string()) {
+            app.logs.push("pnpm detected. Config loaded.".to_string());
+        } else if p_config.scripts.get("dev") == Some(&"cargo run".to_string()) {
+            app.logs.push("Rust detected. Config loaded.".to_string());
+        } else {
+            app.logs
+                .push("Project detected. Config loaded.".to_string());
+        }
     } else {
         app.logs.push("No project type detected.".to_string());
     }
