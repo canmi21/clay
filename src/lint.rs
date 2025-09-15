@@ -9,14 +9,19 @@ use std::path::Path;
 use std::process::Command;
 use walkdir::WalkDir;
 
+// Added Pnpm to the enum
 enum ProjectType {
     Rust,
+    Pnpm,
     Unknown,
 }
 
+// Updated detection logic
 fn detect_project_type(base_path: &Path) -> ProjectType {
     if base_path.join("Cargo.toml").exists() {
         ProjectType::Rust
+    } else if base_path.join("pnpm-lock.yaml").exists() {
+        ProjectType::Pnpm
     } else {
         ProjectType::Unknown
     }
@@ -26,15 +31,24 @@ pub fn run_linter() -> Result<()> {
     let base_path = std::env::current_dir()?;
     println!("Starting linter in: {}", base_path.display());
 
-    // Step 1: Run user-defined lint command
-    run_user_defined_lint(&base_path)?;
-
-    // Step 2 & 3: Run project-specific linters
+    // Detect project type to decide which linter to run
     let project_type = detect_project_type(&base_path);
+
+    // For pnpm projects, we skip the user-defined lint and run our custom header check.
+    // For Rust, we run user-defined first, then our checks.
     match project_type {
-        ProjectType::Rust => run_rust_linter(&base_path)?,
+        ProjectType::Pnpm => {
+            println!("- PNPM project detected. Running header checks only.");
+            run_pnpm_linter(&base_path)?;
+        }
+        ProjectType::Rust => {
+            run_user_defined_lint(&base_path)?;
+            run_rust_linter(&base_path)?;
+        }
         ProjectType::Unknown => {
             println!("- No project-specific linter found for this project type.");
+            // Still attempt to run user-defined lint for unknown projects
+            run_user_defined_lint(&base_path)?;
         }
     }
 
@@ -74,8 +88,40 @@ fn run_rust_linter(base_path: &Path) -> Result<()> {
     Ok(())
 }
 
+// New linter function for pnpm projects
+fn run_pnpm_linter(base_path: &Path) -> Result<()> {
+    println!("- Running PNPM-specific linter...");
+    check_frontend_headers(base_path)?;
+    Ok(())
+}
+
+// New header check for frontend file types
+fn check_frontend_headers(base_path: &Path) -> Result<()> {
+    println!("- Checking and updating file headers for frontend files...");
+    let frontend_extensions = ["tsx", "css", "js", "ts", "jsx"];
+    for entry in WalkDir::new(base_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path().extension().map_or(false, |ext| {
+                frontend_extensions.contains(&ext.to_str().unwrap_or(""))
+            })
+        })
+    {
+        let file_path = entry.path();
+        if let Ok(relative_path) = file_path.strip_prefix(base_path) {
+            // Skip node_modules directory
+            if relative_path.starts_with("node_modules") {
+                continue;
+            }
+            update_file_header(file_path, relative_path)?;
+        }
+    }
+    Ok(())
+}
+
 fn check_rust_headers(base_path: &Path) -> Result<()> {
-    println!("- Checking and updating file headers...");
+    println!("- Checking and updating file headers for Rust files...");
     for entry in WalkDir::new(base_path)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -83,12 +129,18 @@ fn check_rust_headers(base_path: &Path) -> Result<()> {
     {
         let file_path = entry.path();
         if let Ok(relative_path) = file_path.strip_prefix(base_path) {
+            // Skip target directory
+            if relative_path.starts_with("target") {
+                continue;
+            }
             update_file_header(file_path, relative_path)?;
         }
     }
     Ok(())
 }
 
+// This function can be used by both Rust and PNPM linters as `/* ... */` is a valid
+// comment style for all targeted file types.
 fn update_file_header(file_path: &Path, relative_path: &Path) -> Result<()> {
     let file = fs::File::open(file_path)?;
     let reader = BufReader::new(file);
@@ -114,15 +166,9 @@ fn update_file_header(file_path: &Path, relative_path: &Path) -> Result<()> {
         if lines.len() == 1 {
             lines.push(String::new());
             needs_update = true;
-        } else {
-            let second_line = lines[1].trim();
-            if !second_line.is_empty()
-                && !second_line.starts_with("//")
-                && !second_line.starts_with("/*")
-            {
-                lines.insert(1, String::new());
-                needs_update = true;
-            }
+        } else if !lines[1].trim().is_empty() {
+            lines.insert(1, String::new());
+            needs_update = true;
         }
     }
 
@@ -148,10 +194,11 @@ fn check_rust_dependencies(base_path: &Path) -> Result<()> {
 
     for line in content.lines() {
         let trimmed_line = line.trim();
-        if trimmed_line.starts_with('[') && trimmed_line.contains("dependencies") {
+        if trimmed_line.starts_with("[dependencies]")
+            || trimmed_line.starts_with("[dev-dependencies]")
+            || trimmed_line.starts_with("[build-dependencies]")
+        {
             in_dependencies_section = true;
-            new_lines.push(line.to_string());
-            continue;
         } else if trimmed_line.starts_with('[') {
             in_dependencies_section = false;
         }
@@ -167,7 +214,7 @@ fn check_rust_dependencies(base_path: &Path) -> Result<()> {
                             if let Ok(new_line) =
                                 get_updated_dependency_line(line, version_str, key)
                             {
-                                if line != new_line {
+                                if line != &new_line {
                                     modified = true;
                                 }
                                 new_lines.push(new_line);
@@ -180,7 +227,7 @@ fn check_rust_dependencies(base_path: &Path) -> Result<()> {
                 else if val_trimmed.starts_with('"') {
                     let version_str = val_trimmed.trim_matches('"');
                     if let Ok(new_line) = get_updated_dependency_line(line, version_str, key) {
-                        if line != new_line {
+                        if line != &new_line {
                             modified = true;
                         }
                         new_lines.push(new_line);
