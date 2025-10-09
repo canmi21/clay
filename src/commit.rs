@@ -83,13 +83,28 @@ pub fn run_ai_commit() -> Result<()> {
     }
 
     let version_update_str = String::from_utf8_lossy(&version_output.stdout);
-    let versions: Vec<&str> = version_update_str.split_whitespace().collect();
-    let (old_version, new_version) =
-        if versions.len() == 4 && versions[0] == "Version:" && versions[2] == "->" {
-            (versions[1], versions[3])
-        } else {
-            ("version", "new_version")
-        };
+
+    // Parse version info from output
+    // Expected format: "Version: X.Y.Z -> A.B.C in /path/to/file"
+    // Find the line that contains "Version:" and parse it
+    let (old_version, new_version) = version_update_str
+        .lines()
+        .find(|line| line.contains("Version:"))
+        .and_then(|line| {
+            // Split by "Version:" and get the part after it
+            let version_part = line.split("Version:").nth(1)?;
+            // Split by " in " to remove the file path
+            let versions_only = version_part.split(" in ").next()?;
+            // Split by "->" to get old and new versions
+            let parts: Vec<&str> = versions_only.split("->").collect();
+            if parts.len() == 2 {
+                Some((parts[0].trim().to_string(), parts[1].trim().to_string()))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+
     println!("Bumping version {} -> {}", old_version, new_version);
 
     println!("Creating version commit...");
