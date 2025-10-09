@@ -36,6 +36,71 @@ enum VersionChange {
     Bump,   // minor + 1, patch = 0
 }
 
+// Helper function to find and update version in a Cargo.toml file
+fn update_cargo_toml_version(config_path: &Path, change: &VersionChange) -> Result<bool> {
+    let content = fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+
+    let mut lines: Vec<String> = content.lines().map(String::from).collect();
+    let mut version_line_index: Option<usize> = None;
+    let mut old_version_str = String::new();
+    let mut new_version_str = String::new();
+    let mut in_package_section = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed_line = line.trim();
+        if trimmed_line == "[package]" {
+            in_package_section = true;
+            continue;
+        }
+
+        if in_package_section && trimmed_line.starts_with('[') {
+            break;
+        }
+
+        if in_package_section && trimmed_line.starts_with("version") {
+            if let Some(version_val) = trimmed_line.split('=').nth(1) {
+                let version_str = version_val.trim().trim_matches('"');
+                let mut version = Version::parse(version_str)
+                    .with_context(|| format!("Failed to parse version: '{}'", version_str))?;
+
+                old_version_str = version.to_string();
+
+                match change {
+                    VersionChange::Update => version.patch += 1,
+                    VersionChange::Bump => {
+                        version.minor += 1;
+                        version.patch = 0;
+                        version.pre = semver::Prerelease::EMPTY;
+                        version.build = semver::BuildMetadata::EMPTY;
+                    }
+                }
+                new_version_str = version.to_string();
+                version_line_index = Some(i);
+                break;
+            }
+        }
+    }
+
+    if let Some(index) = version_line_index {
+        // Replace the version string directly to preserve formatting
+        lines[index] = lines[index].replace(&old_version_str, &new_version_str);
+
+        fs::write(config_path, lines.join("\n"))
+            .with_context(|| format!("Failed to write to {}", config_path.display()))?;
+
+        println!(
+            "Version: {} -> {} in {}",
+            old_version_str,
+            new_version_str,
+            config_path.display()
+        );
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 fn change_version(change: VersionChange) -> Result<()> {
     let current_dir = std::env::current_dir()?;
     let project_type = detect_project_type(&current_dir);
@@ -43,62 +108,43 @@ fn change_version(change: VersionChange) -> Result<()> {
     match project_type {
         ProjectType::Rust => {
             let config_path = current_dir.join("Cargo.toml");
-            let content = fs::read_to_string(&config_path)
-                .with_context(|| format!("Failed to read {}", config_path.display()))?;
 
-            let mut lines: Vec<String> = content.lines().map(String::from).collect();
-            let mut version_line_index: Option<usize> = None;
-            let mut old_version_str = String::new();
-            let mut new_version_str = String::new();
-            let mut in_package_section = false;
+            // Try to update version in the current directory's Cargo.toml
+            let updated = update_cargo_toml_version(&config_path, &change)?;
 
-            for (i, line) in lines.iter().enumerate() {
-                let trimmed_line = line.trim();
-                if trimmed_line == "[package]" {
-                    in_package_section = true;
-                    continue;
-                }
+            if !updated {
+                // If no version found in root Cargo.toml, it might be a workspace
+                // Search for Cargo.toml files in immediate subdirectories
+                println!("No version found in root Cargo.toml, searching subdirectories...");
 
-                if in_package_section && trimmed_line.starts_with('[') {
-                    break;
-                }
+                let mut found_any = false;
 
-                if in_package_section && trimmed_line.starts_with("version") {
-                    if let Some(version_val) = trimmed_line.split('=').nth(1) {
-                        let version_str = version_val.trim().trim_matches('"');
-                        let mut version = Version::parse(version_str).with_context(|| {
-                            format!("Failed to parse version: '{}'", version_str)
-                        })?;
-
-                        old_version_str = version.to_string();
-
-                        match change {
-                            VersionChange::Update => version.patch += 1,
-                            VersionChange::Bump => {
-                                version.minor += 1;
-                                version.patch = 0;
-                                version.pre = semver::Prerelease::EMPTY;
-                                version.build = semver::BuildMetadata::EMPTY;
+                // Read all entries in the current directory
+                if let Ok(entries) = fs::read_dir(&current_dir) {
+                    for entry in entries.flatten() {
+                        if let Ok(file_type) = entry.file_type() {
+                            if file_type.is_dir() {
+                                let sub_cargo_path = entry.path().join("Cargo.toml");
+                                if sub_cargo_path.exists() {
+                                    // Try to update version in this subdirectory's Cargo.toml
+                                    if update_cargo_toml_version(&sub_cargo_path, &change)? {
+                                        found_any = true;
+                                    }
+                                }
                             }
                         }
-                        new_version_str = version.to_string();
-                        version_line_index = Some(i);
-                        break;
                     }
                 }
-            }
 
-            if let Some(index) = version_line_index {
-                // Replace the version string directly to preserve formatting
-                lines[index] = lines[index].replace(&old_version_str, &new_version_str);
+                if !found_any {
+                    bail!(
+                        "Could not find 'version' in any Cargo.toml files (root or subdirectories)"
+                    )
+                }
 
-                fs::write(&config_path, lines.join("\n"))
-                    .with_context(|| format!("Failed to write to {}", config_path.display()))?;
-
-                println!("Version: {} -> {}", old_version_str, new_version_str);
                 Ok(())
             } else {
-                bail!("Could not find 'version' in [package] section of Cargo.toml")
+                Ok(())
             }
         }
         // Add logic for pnpm projects
