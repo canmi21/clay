@@ -1,9 +1,10 @@
 /* src/version.rs */
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use semver::Version;
 use std::fs;
 use std::path::Path;
+use toml::{Table, Value};
 
 // Add Pnpm to the enum for project types
 enum ProjectType {
@@ -103,6 +104,62 @@ fn update_cargo_toml_version(config_path: &Path, change: &VersionChange) -> Resu
 
 fn change_version(change: VersionChange) -> Result<()> {
     let current_dir = std::env::current_dir()?;
+    let clay_toml_path = current_dir.join("clay.toml");
+
+    if clay_toml_path.exists() {
+        let content = fs::read_to_string(&clay_toml_path)
+            .with_context(|| format!("Failed to read {}", clay_toml_path.display()))?;
+
+        let mut toml_value: Value = if content.trim().is_empty() {
+            Value::Table(Table::new())
+        } else {
+            toml::from_str(&content)
+                .with_context(|| format!("Failed to parse {}", clay_toml_path.display()))?
+        };
+
+        let root_table = toml_value
+            .as_table_mut()
+            .ok_or_else(|| anyhow!("clay.toml root is not a table"))?;
+
+        if !root_table.contains_key("version") {
+            let mut version_table = Table::new();
+            version_table.insert("bump".to_string(), Value::Boolean(false));
+            root_table.insert("version".to_string(), Value::Table(version_table));
+
+            fs::write(&clay_toml_path, toml::to_string_pretty(&toml_value)?)
+                .with_context(|| format!("Failed to write to {}", clay_toml_path.display()))?;
+            println!(
+                "Added `[version]` with `bump = false` to clay.toml. Skipping version change."
+            );
+            return Ok(());
+        }
+
+        let version_table = root_table
+            .get_mut("version")
+            .unwrap()
+            .as_table_mut()
+            .ok_or_else(|| anyhow!("[version] is not a table in clay.toml"))?;
+
+        if let Some(bump_value) = version_table.get("bump") {
+            if !bump_value.as_bool().unwrap_or(false) {
+                // 如果 bump = false，则不执行任何操作
+                println!("`bump` is false in clay.toml. Skipping version change.");
+                return Ok(());
+            }
+            // 如果 bump = true，则继续执行下面的版本更新逻辑
+        } else {
+            // 如果 bump 字段不存在，则添加 bump = false 并退出
+            version_table.insert("bump".to_string(), Value::Boolean(false));
+
+            fs::write(&clay_toml_path, toml::to_string_pretty(&toml_value)?)
+                .with_context(|| format!("Failed to write to {}", clay_toml_path.display()))?;
+            println!(
+                "Added `bump = false` to clay.toml under `[version]`. Skipping version change."
+            );
+            return Ok(());
+        }
+    }
+
     let project_type = detect_project_type(&current_dir);
 
     match project_type {
